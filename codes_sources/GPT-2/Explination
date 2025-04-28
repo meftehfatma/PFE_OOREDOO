@@ -1,1 +1,71 @@
+ 1. Définition :
+GPT-2 est un modèle transformer préentraîné, en mode auto-supervisé. Cela signifie qu’il a appris sans intervention humaine, en utilisant un mécanisme automatique pour la prédiction des mots. 
+Concrètement : 
 
+Le modèle reçoit une séquence de mots et apprend à prédire. 
+
+Pour cela, il utilise un masque d'attention afin de ne prendre en compte que les mots précédents dans la phrase (pas ceux à venir). 
+
+Le modèle présenté ici est la version la plus légère de GPT-2, avec 124 millions de paramètres. 
+
+ Interprétation : Pourquoi GPT-2 est un modèle d'IA générative :  
+
+GPT-2 fait partie des modèles d’IA générative, car : 
+
+Il ne se contente pas d’analyser les données, il en produit : il peut générer du texte cohérent, réaliste et nouveau, à partir d’une simple consigne ou d’un début de phrase. 
+
+Son objectif principal est de créer du contenu original, basé sur ce qu’il a appris du langage pendant l'entraînement. 
+
+Cette capacité à produire automatiquement du texte, à prolonger des idées ou à inventer des scénarios fait de lui un exemple emblématique d’IA générative appliquée au langage naturel. 
+
+GPT-2 est un modèle Transformer génératif : il apprend à partir du texte brut et est capable de générer automatiquement de nouvelles séquences textuelles cohérentes. C’est donc une forme d’intelligence artificielle générative. 
+2. Explication : 
+Ce code met en œuvre une chaîne complète de traitement des séries temporelles via une interaction en langage naturel, en combinant des techniques d’analyse linguistique, de normalisation des données, d’apprentissage profond et d’IA générative.  
+
+les étapes et bibliothèques mobilisées : 
+
+1. Analyse de la question avec spaCy 
+
+La bibliothèque spaCy est utilisée pour le traitement du langage naturel (NLP). Elle permet d’analyser la question de l’utilisateur pour extraire automatiquement : 
+
+    les technologies visées (comme fibre, 4G, 5G, etc.), 
+
+    la durée de prévision (ex. 7 jours), 
+
+    la zone géographique (ex. El Hrairia), 
+
+ à partir d’un modèle pré-entraîné de langue française (fr_core_news_sm). 
+
+2. Préparation des données avec pandas 
+
+Les données, chargées via pandas, sont stockées dans un fichier CSV contenant des statistiques journalières sur les technologies par zone. Elles sont regroupées par date et région, puis filtrées pour ne conserver que les colonnes d’intérêt : count_fibre, count_4g, etc. 
+
+3. Normalisation avec MinMaxScaler de scikit-learn 
+
+Pour rendre les données compatibles avec l’apprentissage automatique, elles sont normalisées avec MinMaxScaler, qui les convertit dans une plage comprise entre 0 et 1. Cela permet un apprentissage plus stable pour le modèle de deep learning. 
+
+4. Création des séquences temporelles 
+
+Une fonction personnalisée génère des séquences à partir des valeurs historiques afin de les utiliser comme entrées pour le modèle LSTM. C’est un prérequis classique dans la modélisation des séries temporelles. 
+
+5. Apprentissage avec un modèle LSTM via Keras 
+
+Un réseau de neurones LSTM est construit avec Keras (via TensorFlow). Ce type de réseau est particulièrement adapté à la modélisation des données dépendantes du temps, comme les évolutions journalières de technologies réseau. Il est entraîné sur les données normalisées pour prédire les jours suivants. 
+
+6. Génération de données synthétiques avec GPT-2 
+
+Après les prédictions, une phase d’IA générative est lancée à l’aide du modèle GPT-2 de la bibliothèque Transformers (Hugging Face). Les prédictions du LSTM sont converties en texte, puis prolongées sous forme de séquences textuelles générées automatiquement. Ces textes sont ensuite reconvertis en valeurs numériques pour enrichir les prédictions initiales. 
+
+7. Fonction d’interaction 
+
+L’ensemble est encapsulé dans une fonction unique qui prend une question utilisateur, la traite, applique le pipeline complet, puis retourne la prévision demandée, zone par zone. 
+
+Ce pipeline illustre parfaitement l’intégration entre NLP, apprentissage profond et génération de texte, exploitant de façon harmonieuse : 
+
+    spaCy pour la compréhension du langage naturel, 
+
+    pandas pour la gestion des données, 
+
+    scikit-learn pour la préparation des features, 
+
+    Keras pour la modélisation LSTM, et transformers pour la génération textuelle avancée avec GPT-2. 
