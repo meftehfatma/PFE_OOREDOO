@@ -1,1 +1,131 @@
+#code fonctionne tres bienn
+import numpy as np
+import pandas as pd
+import re
+import torch
+import spacy
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+from pytorch_forecasting import TemporalFusionTransformer
+from pytorch_forecasting.data import TimeSeriesDataSet
+from pytorch_forecasting.data import GroupNormalizer
+
+# 1. Chargement des modèles
+nlp = spacy.load("fr_core_news_sm")
+tokenizer = AutoTokenizer.from_pretrained("t5-small")  # Transformer T5 pour la génération de texte
+model_transformer = AutoModelForSeq2SeqLM.from_pretrained("t5-small")
+
+# 2. Chargement et préparation des données
+df = pd.read_csv("/content/technologies_par_jour_et_region_avec_gouvernorat.csv", sep='|')
+df['jour'] = pd.to_datetime(df['jour'])
+df_grouped = df.groupby(['jour', 'N_FR_DEL']).sum().reset_index()
+df_grouped = df_grouped[['jour', 'N_FR_DEL', 'count_fixe_jdid', 'count_4g', 'count_5g_box', 'count_fibre']]
+df_grouped = df_grouped.rename(columns={'N_FR_DEL': 'zone'})  # On renomme pour uniformiser
+
+# 3. Création du dataset pour LSTM
+def create_dataset(data, time_step=1):
+    X, y = [], []
+    for i in range(len(data) - time_step - 1):
+        X.append(data[i:(i + time_step)])
+        y.append(data[i + time_step])
+    return np.array(X), np.array(y)
+
+# 4. Génération via Transformer T5
+def generate_synthetic_series(predictions, input_len=100, new_tokens=20):
+    flat_preds = predictions.flatten().tolist()[-input_len:]
+    input_text = " ".join([str(round(val, 2)) for val in flat_preds])
+    inputs = tokenizer.encode(input_text, return_tensors='pt', truncation=True)
+    outputs = model_transformer.generate(inputs, max_length=input_len + new_tokens)
+    generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    try:
+        generated_values = [float(val) for val in generated_text.split() if val.replace('.', '', 1).isdigit()]
+    except ValueError:
+        generated_values = predictions.flatten().tolist()
+    return generated_values[:new_tokens]
+
+# 5. Extraction des informations dans la question
+def extract_technology_period_zone(question, zones_available):
+    doc = nlp(question)
+    technologies, period, zone = [], None, None
+    tech_keywords = ['fibre', 'fixe', '5g', '4g']
+
+    for token in doc:
+        if token.text.lower() in tech_keywords:
+            technologies.append(token.text.lower())
+
+    # Regex robuste pour extraire "7 jours", "32 jour", "15j", etc.
+    match = re.search(r'\b(?:les?\s*)?(\d+)\s*(jours?|j)\b', question.lower())
+    if match:
+        period = int(match.group(1))
+    else:
+        # Sauvegarde : extraire depuis entités spaCy
+        for ent in doc.ents:
+            if ent.label_ == "DATE" and re.search(r'\d+', ent.text):
+                found = re.search(r'\d+', ent.text)
+                period = int(found.group(0))
+                break
+
+    for zone_name in zones_available:
+        if zone_name.lower() in question.lower():
+            zone = zone_name
+            break
+
+    return technologies, period, zone
+
+# 6. Fonction de réponse pour une zone
+def respond_to_question_for_one_zone(question, model, scaler, df_grouped, time_step=30):
+    zones_available = df_grouped['zone'].unique().tolist()
+    technologies, period, zone = extract_technology_period_zone(question, zones_available)
+
+    if not technologies:
+        return "❌ Technologie non spécifiée dans la question."
+    if period is None:
+        return "❌ Période non spécifiée dans la question."
+    if zone is None:
+        return f"❌ Zone non reconnue. Zones disponibles : {', '.join(zones_available)}"
+
+    target = None
+    if 'fibre' in technologies:
+        target = 'count_fibre'
+    elif 'fixe' in technologies:
+        target = 'count_fixe_jdid'
+    elif '5g' in technologies:
+        target = 'count_5g_box'
+    elif '4g' in technologies:
+        target = 'count_4g'
+
+    df_zone = df_grouped[df_grouped['zone'] == zone].sort_values('jour')
+
+    if len(df_zone) < time_step:
+        return f"❌ Pas assez de données pour la zone '{zone}'."
+
+    df_zone[target + '_scaled'] = scaler.fit_transform(df_zone[target].values.reshape(-1, 1))
+    X, y = create_dataset(df_zone[target + '_scaled'].values, time_step)
+    X = X.reshape(X.shape[0], X.shape[1], 1)
+
+    train_size = int(len(X) * 0.8)
+    X_train, X_test = X[:train_size], X[train_size:]
+    y_train, y_test = y[:train_size], y[train_size:]
+
+    model = Sequential()
+    model.add(LSTM(units=50, return_sequences=False, input_shape=(X_train.shape[1], 1)))
+    model.add(Dense(units=1))
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    model.fit(X_train, y_train, epochs=10, batch_size=32, verbose=0)
+
+    y_pred = model.predict(X_test)
+    y_pred = scaler.inverse_transform(y_pred)
+
+    synthetic_series = generate_synthetic_series(y_pred, input_len=100, new_tokens=period)
+
+    return f"📍 Zone : {zone} → 📊 Prévision pour {period} jours :\n{synthetic_series}"
+
+# 7. Exemple d’utilisation
+scaler = MinMaxScaler()
+model = None  # il sera créé dans la fonction
+question = "Peux-tu prévoir les 7 jours pour la fibre à El Hrairia ?"
+response = respond_to_question_for_one_zone(question, model, scaler, df_grouped)
+print(response)
 
