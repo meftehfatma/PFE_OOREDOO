@@ -1,1 +1,37 @@
+1. Definition : 
+BART (Bidirectional and Auto-Regressive Transformers) est un modèle de type Transformer hybride développé par Facebook AI, combinant un encodeur bidirectionnel, similaire à BERT, et un décodeur autoregressif, comme GPT. Son entraînement repose sur la reconstruction de texte corrompu, via le mélange de phrases ou le masquage de segments remplacés par un token unique, ce qui lui permet d’apprendre à comprendre et générer du texte de manière cohérente. Grâce à cette architecture, BART est capable de prédire séquentiellement les mots d’un texte en utilisant le contexte, faisant de lui un modèle d’intelligence artificielle générative performant, capable de produire du contenu nouveau et fluide à partir de données textuelles. 
+2. explication : 
+  1.Chargement des bibliothèques nécessaires : 
 
+     commencer par importer les bibliothèques essentielles pour ton projet. 
+     utiliser des outils de manipulation de données comme numpy et pandas, ainsi que des outils pour le prétraitement du texte comme spacy.
+     Inclure également des bibliothèques pour le traitement des séries temporelles (MinMaxScaler), la création de modèles (LSTM) et la génération de texte avec BART via la bibliothèque transformers de HuggingFace. 
+
+2.Chargement et préparation des données : 
+
+Lire un fichier de données CSV, qui contient des informations sur différentes technologies par jour et par zone géographique. 
+Après avoir convertir les dates au format adéquat, effectuer un groupement des données par jour et par zone. Sélectionner les colonnes d’intérêt, puis renommer certaines pour plus de clarté. 
+
+réation de jeux de données pour l’entraînement du modèle LSTM : 
+
+3.Définir une fonction permettant de préparer les séries temporelles sous forme de jeux de données adaptés à un modèle LSTM. Cette fonction découpe les données en fenêtres de temps de taille fixe et associe à chaque fenêtre la valeur suivante à prédire. Cela permet au modèle d’apprendre la relation entre les données passées et futures. 
+
+    Génération de séries temporelles avec BART : 
+
+    Céation  une fonction qui utilise le modèle BART pour générer de nouvelles valeurs à partir des prévisions du modèle LSTM. 
+    Après avoir préparé les prédictions sous forme textuelle, tu les passes à BART, qui génère des valeurs synthétiques pour compléter la séquence.
+    BART permet ainsi d’élargir les prédictions en générant de nouvelles données de manière fluide. 
+
+ 4.Extraction des informations de la question : 
+
+    Ensuite, tu utilises le modèle de traitement du langage naturel spacy pour analyser la question posée en langage naturel. La fonction identifie les technologies, la période et la zone géographique mentionnées dans la question. Par exemple, elle repère des termes comme "fibre", "fixe", ou "5G", ainsi que des expressions temporelles telles que "7 jours" et les zones géographiques comme "El Hrairia". 
+
+    Prédiction pour une zone spécifique : 
+
+    Une fonction est ensuite définie pour répondre à une question spécifique, en utilisant le modèle LSTM pour prédire les valeurs des technologies dans une zone donnée pendant une période spécifiée. La fonction commence par vérifier la validité des informations extraites de la question. Elle sélectionne ensuite les données pertinentes pour la zone et applique le modèle pour prédire les valeurs futures. Ces prédictions sont ajustées et complétées avec l’aide de BART. 
+
+  5.Exécution de l’exemple : 
+
+    Enfin, un exemple d’utilisation est fourni : une question est posée sur la prévision des 7 prochains jours pour la technologie "fibre" dans une zone spécifique. La fonction est exécutée pour générer une réponse détaillée, incluant les prévisions pour les jours demandés. 
+
+L’ensemble du processus permet de répondre à des questions sur la prévision des technologies dans des zones spécifiques en utilisant des techniques avancées de modélisation des séries temporelles (LSTM) combinées à des générateurs de texte (BART) pour produire des réponses détaillées et synthétiques. 
