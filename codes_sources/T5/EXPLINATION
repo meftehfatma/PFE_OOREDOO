@@ -1,1 +1,87 @@
+1.definition 
+T5 (Text-to-Text Transfer Transformer) est un modèle avancé d’intelligence artificielle générative développé par Google Research, qui repose sur le principe d’unification des tâches de traitement du langage naturel dans un format texte-à-texte. Grâce à cette approche, toutes les entrées et sorties sont représentées sous forme textuelle, ce qui permet au modèle de s’adapter aisément à différents contextes. Pré-entraîné sur un large corpus à l’aide d’une méthode de transfert d’apprentissage, T5 bénéficie d’une grande modularité et flexibilité. En tant que modèle génératif, il est capable de produire du texte cohérent et pertinent à partir d’instructions textuelles, ce qui en fait un outil puissant pour modéliser, transformer ou enrichir des séquences linguistiques. Disponible en open source, il s’appuie sur l’architecture des transformeurs et se distingue par sa capacité à traiter plusieurs langues et à répondre à des besoins variés avec un haut niveau de performance. 
+2.exlication : 
+1. Chargement des modèles NLP et Transformer 
 
+    spaCy est une bibliothèque de NLP (Natural Language Processing) utilisée ici pour l'analyse syntaxique et l'extraction d'entités (nommées). 
+
+    T5 (Text-to-Text Transfer Transformer) est un modèle de type Seq2Seq (sequence-to-sequence) utilisant une architecture Transformer. On charge ici : 
+
+    Tokenizer : transforme le texte en tokens numériques. 
+
+    Modèle pré-entraîné T5 : pour générer du texte à partir d'une entrée. 
+
+ 2. Chargement et prétraitement des données :  
+
+    Pandas est utilisé pour manipuler le DataFrame. 
+
+    Les données sont groupées par jour et par zone (ici N_FR_DEL), puis agrégées par somme. 
+
+    Le nom de la zone est uniformisé avec zone. 
+
+ 3. Création de la séquence pour LSTM 
+
+def create_dataset(data, time_step=1): 
+
+    On crée des fenêtres temporelles glissantes sur les données. 
+
+    Utilisé pour entraîner un modèle LSTM (Long Short-Term Memory), une architecture de réseau de neurones récurrente adaptée aux séries temporelles. 
+
+4. Génération de séries synthétiques avec T5 
+
+def generate_synthetic_series(predictions, input_len=100, new_tokens=20): 
+
+    Utilise le modèle génératif T5 pour prédire de nouvelles valeurs. 
+
+    Les prédictions de l’LSTM sont transformées en texte, puis utilisées comme entrée textuelle pour T5. 
+
+    Le résultat textuel est décodé et reconverti en valeurs numériques.5. Extraction des éléments d'une question avec spaCy 
+
+def extract_technology_period_zone(question, zones_available): 
+
+    Utilise spaCy pour extraire : 
+
+    Les technologies cibles (ex: fibre, 5G…), 
+
+    La période temporelle (via des expressions régulières ou entités), 
+
+    Et la zone géographique. 
+
+    Applique des techniques de traitement automatique du langage naturel (NLP) pour comprendre la question. 
+
+6. Pipeline complet de prédiction 
+
+def respond_to_question_for_one_zone(...): 
+
+    Cette fonction : 
+
+    Interprète la question avec NLP, 
+
+    Filtre les données par zone et technologie, 
+
+    Normalise les valeurs avec MinMaxScaler (mise à l’échelle), 
+
+    Entraîne un modèle LSTM sur les données historiques, 
+
+    Utilise T5 pour générer une prévision synthétique de n jours. 
+
+    Combine modèle discriminatif (LSTM) avec un modèle génératif (T5). 
+
+ 7. Exemple de prédiction 
+
+Question = "Peux-tu prévoir les 7 jours pour la fibre à El Hrairia ?" 
+response = respond_to_question_for_one_zone(...) 
+
+    L'utilisateur pose une question naturelle. 
+
+    Le système extrait les paramètres, entraîne un modèle LSTM, puis utilise T5 pour générer une série temporelle plausible pour les jours à venir. 
+
+Ce code implémente un pipeline hybride d’intelligence artificielle mêlant : 
+
+    NLP avec spaCy pour la compréhension des questions, 
+
+    Modélisation de séries temporelles avec LSTM, 
+
+    Et génération de séries synthétiques avec le Transformer T5, un modèle d'IA générative. 
+
+Il peut servir à automatiser des prévisions personnalisées sur la couverture réseau par technologie et par région. 
