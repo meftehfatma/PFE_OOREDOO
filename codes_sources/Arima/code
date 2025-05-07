@@ -1,0 +1,50 @@
+# Import necessary libraries
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from statsmodels.tsa.arima.model import ARIMA
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+# Load your data (replace with your actual dataset)
+df = pd.read_csv("/content/df_counts_preprocessing.csv")
+
+# Split the data into train and test sets (80% for training, 20% for testing)
+train_size = int(len(df) * 0.8)
+train, test = df[:train_size], df[train_size:]
+
+# List of target columns
+target_columns = ['count_fixe_jdid', 'count_4g', 'count_5g_box', 'count_fibre']
+
+# Iterate over each target column to fit ARIMA model
+for target in target_columns:
+    print(f"\nForecasting for {target}...")
+
+    # Fit ARIMA model (adjust p, d, q as needed)
+    p, d, q = 5, 1, 0  # Example ARIMA parameters
+    model = ARIMA(train[target], order=(p, d, q))
+    model_fit = model.fit()
+
+    # Make predictions on the test set
+    predictions = model_fit.forecast(steps=len(test))
+
+    # Calculate the error metrics
+    y_true = test[target].values
+    y_pred = predictions
+
+    mae = mean_absolute_error(y_true, y_pred)
+    mse = mean_squared_error(y_true, y_pred)
+    r2 = r2_score(y_true, y_pred)
+
+    # Print error metrics
+    print(f"Mean Absolute Error (MAE) for {target}: {mae:.4f}")
+    print(f"Mean Squared Error (MSE) for {target}: {mse:.4f}")
+
+    # Plot the actual vs predicted values for this target
+    plt.figure(figsize=(10, 6))
+    plt.plot(test.index, y_true, label='Actual', color='blue')
+    plt.plot(test.index, y_pred, label='Predicted', color='red', linestyle='dashed')
+    plt.title(f'ARIMA: Actual vs Predicted for {target}')
+    plt.xlabel('Date and Time')
+    plt.ylabel(f'{target} Count')
+    plt.legend()
+    plt.show()
