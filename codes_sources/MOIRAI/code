@@ -1,0 +1,113 @@
+!pip install torch  moirai uni2ts
+# 📦 Imports
+import torch
+import matplotlib.pyplot as plt
+import pandas as pd
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from gluonts.dataset.pandas import PandasDataset
+from gluonts.dataset.split import split
+from uni2ts.model.moirai import MoiraiForecast, MoiraiModule
+
+# ✅ GPU
+use_gpu = torch.cuda.is_available()
+device = "cuda" if use_gpu else "cpu"
+
+# ✅ Paramètres
+SIZE = "small"
+PDT = 300  # 30 heures
+CTX = 200
+PSZ = "auto"
+BSZ = 32
+TEST = 100
+
+# ✅ Charger les données
+df = pd.read_csv("/content/df_counts_preprocessing.csv", parse_dates=['date_heure'])
+!pip install torch  moirai uni2ts
+# ✅ Colonnes cibles à prédire
+targets = ['count_fixe_jdid', 'count_4g', 'count_5g_box', 'count_fibre']
+
+# ✅ Démarrer les tracés
+plt.figure(figsize=(14, 8))
+
+for target in targets:
+    tech_data = df[['date_heure', target]].copy()
+    tech_data = tech_data.rename(columns={'date_heure': 'ds', target: 'count'})
+    tech_data = tech_data.dropna()
+
+    if len(tech_data) < 4:
+        print(f"⚠️ Pas assez de données pour {target}, ignoré.")
+        continue
+
+    # ✅ Régulariser les timestamps à une fréquence horaire
+    date_range = pd.date_range(start=tech_data['ds'].min(), end=tech_data['ds'].max(), freq='H')
+    tech_data = tech_data.set_index('ds').reindex(date_range).fillna(0).reset_index()
+    tech_data.rename(columns={'index': 'ds'}, inplace=True)
+
+    # ✅ Dataset GluonTS
+    tech_ds = PandasDataset(dict(tech_data.set_index('ds')))
+
+    TEST = min(TEST, len(tech_data) - PDT)
+    TEST = max(TEST, PDT)
+
+    if TEST <= 0:
+        print(f"⚠️ Données insuffisantes pour {target}.")
+        continue
+
+    train, test_template = split(tech_ds, offset=-TEST)
+    windows = max(1, TEST // PDT)
+    test_data = test_template.generate_instances(prediction_length=PDT, windows=windows, distance=PDT)
+
+    # ✅ Charger Moirai
+    model = MoiraiForecast(
+        module=MoiraiModule.from_pretrained(f"Salesforce/moirai-1.0-R-{SIZE}"),
+        prediction_length=PDT,
+        context_length=CTX,
+        patch_size=PSZ,
+        num_samples=100,
+        target_dim=1,
+        feat_dynamic_real_dim=tech_ds.num_feat_dynamic_real,
+        past_feat_dynamic_real_dim=tech_ds.num_past_feat_dynamic_real,
+    )
+
+    predictor = model.create_predictor(batch_size=BSZ)
+    forecasts = predictor.predict(test_data.input)
+    forecast_list = list(forecasts)
+
+    if not forecast_list:
+        print(f"⚠️ Aucun forecast pour {target}")
+        continue
+
+    forecast = forecast_list[0]
+    y_pred = forecast.mean
+    y_true = tech_data['count'].iloc[-PDT:].values
+
+    # ✅ Évaluation
+    mse = mean_squared_error(y_true, y_pred)
+    mae = mean_absolute_error(y_true, y_pred)
+    r2 = r2_score(y_true, y_pred)
+
+    print(f"\n📊 Scores pour {target} sur les {PDT} dernières heures :")
+    print(f"🔹 MSE : {mse:.2f}")
+    print(f"🔹 MAE : {mae:.2f}")
+
+    # ✅ Tracer les données
+    plt.plot(tech_data['ds'], tech_data['count'], label=f'Données réelles ({target})')
+    future_dates = pd.date_range(start=tech_data['ds'].max(), periods=PDT, freq='H')
+    plt.plot(future_dates, y_pred, label=f'Prévision ({target})', linestyle='dashed')
+
+    # ✅ Sauvegarder la prévision
+    forecast_df = pd.DataFrame({
+        'time': future_dates,
+        'forecast': y_pred
+    })
+    forecast_df.to_csv(f"prediction_30heures_{target}.csv", index=False)
+    print(f"📁 Prévision enregistrée pour {target}")
+
+# ✅ Mise en forme finale
+plt.xlabel('Date (heure)')
+plt.ylabel('Occurrences')
+plt.title('Prévisions horaires sur 30 périodes (Moirai)')
+plt.legend()
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
