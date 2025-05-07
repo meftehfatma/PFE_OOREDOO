@@ -1,0 +1,64 @@
+import pandas as pd
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+# Charger les données
+df = pd.read_csv("/content/df_counts_preprocessing.csv")
+
+# Convertir la colonne 'jour' et 'heure' en une seule colonne datetime
+df['date_heure'] = pd.to_datetime(df['jour'] + ' ' + df['heure'].astype(str))
+
+# Convertir la colonne 'date_heure' en timestamp (nombre de secondes depuis le 1er janvier 1970)
+df['timestamp'] = df['date_heure'].astype(int) // 10**9  # Conversion en secondes
+
+# Remplacer les dates manquantes par une valeur par défaut si nécessaire
+df = df.dropna(subset=['timestamp'])
+
+# Exemple de sélection de colonnes pour X et y
+X = df[['timestamp', 'jour_semaine', 'mois']]  # Variables indépendantes
+y_fixe_jdid = df['count_fixe_jdid']  # Variable cible (à changer pour chaque variable)
+y_4g = df['count_4g']
+y_5g_box = df['count_5g_box']
+y_fibre = df['count_fibre']
+
+# Séparation en données d'entraînement et de test (80% entraînement, 20% test)
+X_train, X_test, y_train_fixe_jdid, y_test_fixe_jdid = train_test_split(X, y_fixe_jdid, test_size=0.2, random_state=42)
+X_train, X_test, y_train_4g, y_test_4g = train_test_split(X, y_4g, test_size=0.2, random_state=42)
+X_train, X_test, y_train_5g_box, y_test_5g_box = train_test_split(X, y_5g_box, test_size=0.2, random_state=42)
+X_train, X_test, y_train_fibre, y_test_fibre = train_test_split(X, y_fibre, test_size=0.2, random_state=42)
+
+# Initialisation du modèle de régression linéaire
+model = LinearRegression()
+
+# Entraînement du modèle sur chaque variable cible
+model.fit(X_train, y_train_fixe_jdid)
+y_pred_fixe_jdid = model.predict(X_test)
+
+model.fit(X_train, y_train_4g)
+y_pred_4g = model.predict(X_test)
+
+model.fit(X_train, y_train_5g_box)
+y_pred_5g_box = model.predict(X_test)
+
+model.fit(X_train, y_train_fibre)
+y_pred_fibre = model.predict(X_test)
+
+# Calcul des erreurs pour chaque prédiction
+def calculate_metrics(y_true, y_pred):
+    mae = mean_absolute_error(y_true, y_pred)
+    mse = mean_squared_error(y_true, y_pred)
+    return mae, mse, r2
+
+# Calcul des erreurs pour chaque variable cible
+mae_fixe_jdid, mse_fixe_jdid, r2_fixe_jdid = calculate_metrics(y_test_fixe_jdid, y_pred_fixe_jdid)
+mae_4g, mse_4g, r2_4g = calculate_metrics(y_test_4g, y_pred_4g)
+mae_5g_box, mse_5g_box, r2_5g_box = calculate_metrics(y_test_5g_box, y_pred_5g_box)
+mae_fibre, mse_fibre, r2_fibre = calculate_metrics(y_test_fibre, y_pred_fibre)
+
+# Affichage des résultats
+print("Regression Lineaire")
+print(f"Pour 'count_fixe_jdid' : MAE = {mae_fixe_jdid:.4f}, MSE = {mse_fixe_jdid:.4f}")
+print(f"Pour 'count_4g' : MAE = {mae_4g:.4f}, MSE = {mse_4g:.4f}")
+print(f"Pour 'count_5g_box' : MAE = {mae_5g_box:.4f}, MSE = {mse_5g_box:.4f}")
+print(f"Pour 'count_fibre' : MAE = {mae_fibre:.4f}, MSE = {mse_fibre:.4f}")
