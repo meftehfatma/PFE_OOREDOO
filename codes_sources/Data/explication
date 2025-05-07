@@ -1,0 +1,6 @@
+delegation : 
+Ce code a pour but de localiser géographiquement des données issues d’un fichier CSV, en associant chaque point (défini par sa longitude et sa latitude) à une délégation administrative
+présente dans un fichier shapefile (fichier cartographique vectoriel). Il nettoie d’abord les coordonnées GPS, crée une représentation géographique des points à l’aide de GeoPandas, puis
+effectue une jointure spatiale avec une carte des délégations afin d’identifier à quelle zone administrative chaque point appartient. Enfin, il permet de sauvegarder ces informations enrichies 
+et de visualiser les résultats sur une carte pour des analyses spatiales.
+extract_technology : 
