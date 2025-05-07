@@ -1,0 +1,59 @@
+import pandas as pd
+import geopandas as gpd
+import matplotlib.pyplot as plt
+from shapely.geometry import Point
+# Nettoyer les colonnes 'longitud_dc' et 'latitude_dec' (retirer les espaces et convertir en float)
+import pandas as pd
+
+df = pd.read_csv("/home/fatma/Téléchargements/data_extracted.csv")
+
+df['nouvelle_longitude'] = df['longitude_dec'].str.strip().replace(r'^\s*\.', '', regex=True).astype(float)
+df['latitude_dec'] = df['latitude_dec'].str.strip().replace(r'^\s*\.', '', regex=True).astype(float)
+
+# Groupe par jour, nom_delegation, ip_address, longitude et latitude, puis somme chaque technologie
+
+# Afficher les premiers résultats
+print(df_counts.head())
+print(len(df_counts))
+
+# Sauvegarder le fichier résultant si nécessaire
+
+# Exemple : ton DataFrame avec 'longitude' et 'latitude'
+df['geometry'] = df.apply(lambda row: Point(row[ 'nouvelle_longitude'], row['nouvelle_latitude']), axis=1)
+gdf = gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")  # WGS84
+# Charger le shape
+carte = gpd.read_file("/home/fatma/Téléchargements/délégation shp/Del.shp")  # adapter le chemin
+
+# Jointure spatiale entre le shape et les points
+joined = gpd.sjoin(gdf, carte, how='inner', predicate='intersects')
+print(joined.columns)
+import pandas as pd
+import geopandas as gpd
+import matplotlib.pyplot as plt
+from shapely.geometry import Point
+
+# Charger le fichier CSV (remplace le chemin par le bon)
+df['geometry'] = df.apply(lambda row: Point(row[ 'nouvelle_longitude'], row['nouvelle_latitude']), axis=1)
+
+# Créer une colonne 'geometry' avec les objets Point (Longitude, Latitude)
+
+# Convertir le DataFrame en GeoDataFrame avec le CRS "EPSG:4326" (WGS84)
+gdf = gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")
+
+# Charger le shapefile des déléguations (remplace le chemin par le bon)
+carte = gpd.read_file("/home/fatma/Téléchargements/délégation shp/Del.shp")
+carte = carte.to_crs(epsg=4326)  # Reprojection du shapefile au CRS WGS84
+
+# Jointure spatiale entre le GeoDataFrame et le shapefile des déléguations
+joined = gpd.sjoin(gdf, carte, how='inner', predicate='intersects')
+
+# Afficher les résultats de la jointure
+
+# Sauvegarder le résultat dans un fichier CSV si nécessaire
+joined.to_csv("/home/fatma/Téléchargements/vente_with_delegation.csv", index=False)
+
+# Optionnel : Visualiser les résultats sur une carte
+ax = carte.plot(figsize=(10, 10), color='lightgrey', edgecolor='black')
+joined.plot(ax=ax, marker='o', color='red', markersize=5)
+plt.show()
+
