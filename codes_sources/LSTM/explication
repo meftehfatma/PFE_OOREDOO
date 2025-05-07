@@ -1,0 +1,46 @@
+Ce script effectue une prévision univariée de séries temporelles pour plusieurs types de technologies (fixe jdid, 4g, 5g box, fibre) à l’aide d’un modèle LSTM (Long Short-Term Memory), avec les étapes suivantes :
+🔹 1. Chargement et préparation
+
+    Le fichier df_counts_preprocessing.csv est chargé, avec conversion de la colonne jour au format datetime.
+
+    Les cibles de la prévision sont listées dans target_columns.
+
+🔹 2. Création des séquences temporelles
+
+    Pour chaque technologie, on extrait les données sous forme d’une séquence glissante de 7 jours (time_step = 7) pour prédire la valeur du 8ᵉ jour.
+
+    Cela crée des jeux de données X (entrées) et y (sorties).
+
+🔹 3. Normalisation
+
+    Chaque série est mise à l’échelle entre 0 et 1 avec MinMaxScaler pour faciliter l’apprentissage du LSTM.
+
+🔹 4. Séparation en entraînement/test
+
+    80% des séquences sont utilisées pour l'entraînement, 20% pour le test.
+
+🔹 5. Construction et entraînement du modèle LSTM
+
+    Le modèle utilise une couche LSTM avec 50 unités suivie d'une couche Dense pour produire une valeur de sortie.
+
+    Il est entraîné avec l’algorithme Adam sur 10 époques.
+
+🔹 6. Prédiction et évaluation
+
+    Le modèle prédit les valeurs futures.
+
+    Les prédictions sont transformées à leur échelle d’origine.
+
+    Trois métriques d’évaluation sont calculées :
+
+        MAE (Mean Absolute Error)
+
+        MSE (Mean Squared Error)
+
+        R² (coefficient de détermination)
+
+🔹 7. Visualisation
+
+    Un graphique est affiché pour chaque technologie montrant la courbe réelle et la courbe prédite.
+
+💡 Utilité : Ce pipeline permet de suivre l’évolution quotidienne de chaque technologie, et de générer des prévisions à court terme à l’aide du deep learning.
