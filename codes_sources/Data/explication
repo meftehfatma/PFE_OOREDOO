@@ -27,3 +27,26 @@ Voici ce que fait chaque étape :
     Export final : les nouvelles données enrichies sont sauvegardées dans un fichier CSV (data_extracted.csv).
 
 👉 Ce traitement permet de structurer des informations complexes imbriquées dans des champs JSON pour faciliter les analyses futures (comptage, filtrage, etc.).
+group_donnees : 
+Ce script a pour objectif de préparer des données de couverture technologique par date et localisation, en nettoyant et en structurant les informations extraites précédemment. Voici une explication détaillée de chaque étape :
+🔹 1. Chargement des données
+
+Le fichier CSV contenant les données enrichies (df_with_delegations.csv) est chargé.
+🔹 2. Nettoyage du texte
+
+La colonne response_extracted_technologies est convertie en minuscules pour faciliter la recherche de mots-clés (comme "4g", "fibre", etc.).
+🔹 3. Transformation temporelle
+
+La colonne requested_at est convertie en format datetime. Une nouvelle colonne jour est ensuite créée pour ne conserver que la date (sans l'heure).
+🔹 4. Comptage des technologies
+
+
+Chaque détection est convertie en 1 (présente) ou 0 (absente) via une regex, ce qui permet un comptage binaire. Les valeurs sont ensuite converties en entiers.
+🔹 5. Agrégation par jour et localisation
+
+Les données sont groupées par jour, ip_address, longitude, latitude, puis on somme les valeurs binaires des technologies pour obtenir un nombre d’occurrences par site et par jour.
+🔹 6. Sortie
+
+Le DataFrame df_counts contient désormais les comptages journaliers de chaque technologie par position géographique.
+
+💡 Utilité : Cette préparation est idéale pour des analyses temporelles ou spatiales des technologies présentes (ex. : carte de chaleur, séries temporelles, prévisions).
