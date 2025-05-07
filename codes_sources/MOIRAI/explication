@@ -1,0 +1,28 @@
+    Installation des packages :
+    Le code commence par installer les bibliothèques nécessaires à l'exécution, comme torch pour les calculs sur GPU, moirai pour la prévision avec le modèle Moirai, et uni2ts pour travailler avec les séries temporelles.
+
+    Initialisation des paramètres :
+    Des paramètres sont définis pour la taille du modèle, la période de prédiction, la taille des lots de données, etc. Cela prépare le modèle pour l'entraînement et la prédiction.
+
+    Chargement et préparation des données :
+    Les données sont lues depuis un fichier CSV, et certaines colonnes sont sélectionnées pour être utilisées comme cibles dans la prédiction. Le processus de nettoyage des données consiste à transformer les timestamps en une fréquence horaire régulière et à gérer les valeurs manquantes.
+
+    Création du jeu de données pour GluonTS :
+    Une fois les données nettoyées et transformées, elles sont converties en un format compatible avec GluonTS, ce qui permet de créer des séries temporelles adaptées à l'entraînement du modèle.
+
+    Séparation des données en ensembles d'entraînement et de test :
+    Les données sont divisées en ensembles d'entraînement et de test à l'aide de la fonction split. La taille de l'ensemble de test est définie, et une fenêtre de prédiction est configurée.
+
+    Chargement et utilisation du modèle Moirai :
+    Le modèle Moirai est chargé avec des paramètres pré-entraînés. Il est utilisé pour prédire les séries temporelles sur la base des données de test.
+
+    Évaluation des performances du modèle :
+    Les prévisions générées par Moirai sont comparées aux valeurs réelles des données de test. Des métriques d'évaluation telles que l'erreur quadratique moyenne (MSE), l'erreur absolue moyenne (MAE) et le score R² sont calculées pour mesurer la qualité de la prédiction.
+
+    Visualisation des résultats :
+    Les résultats sont tracés sur un graphique montrant les données réelles et les prévisions pour chaque cible. Cela permet de visualiser la performance du modèle sur une période donnée.
+
+    Sauvegarde des prévisions :
+    Les prévisions générées pour chaque cible sont sauvegardées dans des fichiers CSV pour une analyse ultérieure.
+
+Le tout permet de charger des séries temporelles, d'appliquer un modèle de prévision (Moirai) et d'évaluer sa performance tout en sauvegardant les résultats pour un usage futur.
