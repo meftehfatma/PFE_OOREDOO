@@ -1,1 +1,40 @@
+    Chargement des données :
+
+        Le fichier CSV contenant les données est chargé avec pd.read_csv(). Les colonnes jour, heure et les comptages pour différentes technologies sont extraites.
+
+    Conversion des dates :
+
+        La colonne jour est convertie en format datetime pour pouvoir manipuler les dates facilement.
+
+        Ensuite, une nouvelle colonne date_heure est créée en combinant la colonne jour et heure pour obtenir une timestamp précise pour chaque observation horaire.
+
+    Nettoyage des données :
+
+        Les lignes avec des valeurs manquantes dans les colonnes date_heure et les différentes technologies sont supprimées. Cela permet de garantir que seules les données complètes sont utilisées pour les prévisions.
+
+    Initialisation de l'API TimeGPT :
+
+        L'API Nixtla est initialisée avec une clé d'API. Cette API sera utilisée pour effectuer des prévisions sur les séries temporelles.
+
+    Préparation des données pour chaque technologie :
+
+        Le code parcourt chaque technologie (comme count_fibre, count_4g, etc.) et crée un sous-ensemble de données pour chaque colonne.
+
+        Ensuite, pour chaque sous-ensemble de données, la plage de dates est définie de manière à inclure toutes les dates horaires manquantes entre la date minimale et maximale des données disponibles.
+
+        Si des valeurs manquent pour chaque heure, elles sont remplacées par 0.
+
+    Prédiction avec TimeGPT :
+
+        Pour chaque technologie, le modèle TimeGPT est utilisé pour prédire les valeurs futures pendant 300 heures. Cela correspond à un horizon de prévision de 12 jours (en supposant une fréquence horaire).
+
+    Visualisation des résultats :
+
+        Pour chaque technologie, un graphique est généré pour comparer les données réelles et les prévisions de TimeGPT. Les courbes sont tracées sur le même graphique avec des couleurs différentes pour les différencier.
+
+    Affichage des prévisions :
+
+        Les graphiques sont affichés, montrant l'évolution des données réelles et les prévisions sur 300 heures.
+
+Cette méthode permet d'examiner et de prévoir l'évolution des différentes technologies sur des périodes futures à l'aide de TimeGPT.
 
