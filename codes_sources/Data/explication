@@ -4,3 +4,26 @@ présente dans un fichier shapefile (fichier cartographique vectoriel). Il netto
 effectue une jointure spatiale avec une carte des délégations afin d’identifier à quelle zone administrative chaque point appartient. Enfin, il permet de sauvegarder ces informations enrichies 
 et de visualiser les résultats sur une carte pour des analyses spatiales.
 extract_technology : 
+Ce code a pour objectif de traiter des colonnes contenant du texte au format JSON dans un fichier CSV, afin d’en extraire automatiquement les noms de technologies et
+les offres associées, puis de les stocker dans de nouvelles colonnes plus facilement exploitables.
+
+Voici ce que fait chaque étape :
+
+    Lecture du fichier CSV : le fichier source (data_fixed.csv) est chargé avec le bon séparateur (|).
+
+    Traitement du JSON : une fonction corrige les chaînes de caractères JSON mal formatées (apostrophes, booléens) et extrait :
+
+        les noms des technologies (technology_name)
+
+        les noms des offres (offer_name) contenues dans chaque technologie
+
+    Application de la fonction :
+
+        D’abord sur la colonne response_body (réponse reçue)
+
+        Puis sur request_body (requête envoyée)
+        Les résultats sont stockés dans des colonnes comme response_extracted_technologies, response_offers, etc.
+
+    Export final : les nouvelles données enrichies sont sauvegardées dans un fichier CSV (data_extracted.csv).
+
+👉 Ce traitement permet de structurer des informations complexes imbriquées dans des champs JSON pour faciliter les analyses futures (comptage, filtrage, etc.).
