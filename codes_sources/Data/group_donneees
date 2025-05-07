@@ -1,0 +1,37 @@
+import pandas as pd
+
+# Charger les données
+df = pd.read_csv("/home/fatma/Téléchargements/df_with_delegations.csv", sep='|')
+
+# Mise en minuscule pour nettoyage
+df['response_extracted_technologies'] = df['response_extracted_technologies'].str.lower()
+
+# Convertir la colonne 'requested_at' en datetime si nécessaire
+df['requested_at'] = pd.to_datetime(df['requested_at'], errors='coerce')
+
+# Extraire la date
+df['jour'] = df['requested_at'].dt.date
+
+# Comptage des technologies
+df['count_fixe_jdid'] = df['response_extracted_technologies'].str.contains(r'fixe jdid', case=False, regex=True).astype(float)
+df['count_4g'] = df['response_extracted_technologies'].str.contains(r'\b4g\b', case=False, regex=True).astype(float)
+df['count_5g_box'] = df['response_extracted_technologies'].str.contains(r'5g.*box', case=False, regex=True).astype(float)
+df['count_fibre'] = df['response_extracted_technologies'].str.contains(r'fibre', case=False, regex=True).astype(float)
+
+# Remplir les NaN avec 0 pour éviter les erreurs de conversion
+df['count_fixe_jdid'] = df['count_fixe_jdid'].fillna(0).round().astype(int)
+df['count_4g'] = df['count_4g'].fillna(0).round().astype(int)
+df['count_5g_box'] = df['count_5g_box'].fillna(0).round().astype(int)
+df['count_fibre'] = df['count_fibre'].fillna(0).round().astype(int)
+
+# Ajouter la colonne 'nom_delegation' (supposons qu'elle existe déjà dans le DataFrame)
+# Si ce n'est pas le cas, assure-toi d'ajouter la colonne de la région en fonction de ton modèle
+# Exemple : df['nom_delegation'] = 'NomDeRegion'
+
+# Groupe par jour et nom_delegation, puis somme chaque technologie
+df_counts = df.groupby(['jour', 'ip_address', 'longitude', 'latitude'])[['count_fixe_jdid', 'count_4g', 'count_5g_box', 'count_fibre']].sum().reset_index()
+# Afficher les premiers résultats
+print(df_counts.head())
+print(len(df_counts))
+
+# Sauvegarder le fichier résultant si nécessaire
