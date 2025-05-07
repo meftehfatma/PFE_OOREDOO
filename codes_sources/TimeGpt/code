@@ -1,1 +1,58 @@
+!pip install nixtla
+from nixtla import NixtlaClient
+nixtla_client = NixtlaClient(api_key ='nixak-R1sCCHqO2Mh6saSKI70Y1wv2IsJsRrFeVMDun0kBousP6aMWEduqWsy4PD0grs8iOdQ2FE5VaWXF2fSk')
+import pandas as pd
+import matplotlib.pyplot as plt
+from nixtla import NixtlaClient
+
+# Charger la base de données avec les colonnes 'jour', 'heure' et 'count' pour chaque technologie
+df = pd.read_csv("/home/fatma/Téléchargements/df_counts.csv", sep='|')  # Vérifier les colonnes
+print("Colonnes du DataFrame :", df.columns)
+
+# Convertir 'jour' en format datetime et gérer 'heure'
+df['jour'] = pd.to_datetime(df['jour'], errors='coerce')
+df['date_heure'] = df.apply(lambda row: pd.to_datetime(f"{row['jour'].date()} {int(row['heure'])}:00:00"), axis=1)
+
+# Supprimer les lignes où la date ou les valeurs 'fibre', '4g', 'fixe_jdid' sont manquantes
+df = df.dropna(subset=['date_heure', 'count_fibre', 'count_4g', 'count_fixe_jdid'])
+
+# Initialiser TimeGPT
+nixtla_client = NixtlaClient(api_key="nixak-3CvH4l8uEyoOIGR0KVuAO9E78tnUhlAF1j2nP9Z7HxW54OIVAyfI66GhtkDoJIbNEBVXlVcYeZFze3It")
+
+# Liste des technologies
+technologies = ['count_fibre', 'count_4g', 'count_fixe_jdid', 'count_5g_box']
+
+# Boucle sur chaque technologie
+for tech in technologies:
+    # Sélectionner la colonne de la technologie
+    df_tech = df[['date_heure', tech]].copy()
+    
+    # Compléter les dates manquantes pour chaque technologie
+    date_min = df_tech['date_heure'].min()
+    date_max = df_tech['date_heure'].max()
+    date_range = pd.date_range(start=date_min, end=date_max, freq='H')  # Utilisation de la fréquence horaire
+
+    df_tech = df_tech.set_index('date_heure').reindex(date_range).reset_index().rename(columns={"index": "date_heure"})
+    df_tech['y'] = df_tech[tech].fillna(0).astype(int)  # Remplacer les valeurs manquantes par 0
+    
+    # Renommer la colonne 'date_heure' en 'ds' pour TimeGPT
+    df_tech = df_tech.rename(columns={"date_heure": "ds"})
+    
+    # Prédiction TimeGPT sur 150 heures (par exemple, 6 jours)
+    future = nixtla_client.forecast(df=df_tech[["ds", "y"]], h=300, freq="H")
+    
+    # 📊 Tracer l'évolution du nombre d'occurrences
+    plt.figure(figsize=(12, 6))
+    plt.plot(df_tech['ds'], df_tech['y'], label="Données réelles", color="blue")
+    plt.plot(future['ds'], future['TimeGPT'], label="Prévisions TimeGPT", color="red", linestyle="dashed")
+
+    plt.xlabel("Date et Heure")
+    plt.ylabel("Nombre d'occurrences")
+    plt.title(f"Prédictions TimeGPT pour la technologie {tech}")
+    plt.legend()
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
+
+print("Prévisions affichées sans les scores sauvegardés.")
 
