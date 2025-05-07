@@ -1,0 +1,113 @@
+!pip install git+https://github.com/amazon-science/chronos-forecasting.git
+!pip install timesfm
+import pandas as pd
+import numpy as np
+import timesfm
+import matplotlib.pyplot as plt
+import torch
+from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+
+# ✅ Vérifier si un GPU est disponible
+use_gpu = torch.cuda.is_available()
+backend = "gpu" if use_gpu else "cpu"
+
+# ✅ Initialiser TimesFM avec les bons paramètres
+model = timesfm.TimesFm(
+    hparams=timesfm.TimesFmHparams(
+        backend=backend,
+        per_core_batch_size=32,
+        horizon_len=128,
+        context_len=2048,
+        num_layers=50,
+        use_positional_embedding=False,
+    ),
+    checkpoint=timesfm.TimesFmCheckpoint(
+        huggingface_repo_id="google/timesfm-2.0-500m-pytorch"
+    ),
+)
+
+print(f"✅ TimesFM chargé avec PyTorch sur {backend.upper()}.")
+
+# ✅ Charger les données
+df = pd.read_csv("/content/df_counts_preprocessing.csv")
+
+# ✅ Créer la colonne 'ds' en combinant 'jour' et 'heure'
+df['ds'] = pd.to_datetime(df['jour'].astype(str) + ' ' + df['heure'].astype(str), errors="coerce")
+
+# ✅ Ajouter des colonnes pour le jour de la semaine, mois et jour de l'année
+df['jour_semaine'] = df['ds'].dt.dayofweek
+df['mois'] = df['ds'].dt.month
+df['jour_de_l_annee'] = df['ds'].dt.dayofyear
+
+# ✅ Création d'un DataFrame avec les colonnes cibles comme 'y'
+df_expanded = df[['ds', 'count_fixe_jdid', 'count_4g', 'count_5g_box', 'count_fibre', 'jour_semaine', 'mois', 'jour_de_l_annee']]
+
+# ✅ Convertir 'ds' en index pour une utilisation dans TimesFM
+df_expanded.set_index('ds', inplace=True)
+
+# ✅ Liste des colonnes cibles
+target_columns = ['count_fixe_jdid', 'count_4g', 'count_5g_box', 'count_fibre']
+
+# ✅ Liste pour stocker les prévisions
+future_data = []
+
+plt.figure(figsize=(12, 6))
+
+# ✅ Prédictions pour chaque technologie (on limite à 5 pour éviter trop de courbes)
+for target in target_columns:
+    # 🎯 Filtrer les données pour la colonne cible actuelle
+    target_data = df_expanded[['jour_semaine', 'mois', 'jour_de_l_annee', target]].dropna()
+
+    # 📌 Vérifier si les données sont suffisantes
+    if len(target_data) < 10:
+        print(f"⚠️ Pas assez de données pour {target}, prévision ignorée.")
+        continue
+
+    # 🎯 Appliquer TimeFM
+    forecast_horizon = 300  # 30 heures de prévision
+    forecast_input = [target_data[target].values]  # Convert 'count' column to numpy array
+    frequency_input = [0]  # Assume a single time series with frequency 0
+
+    point_forecast, _ = model.forecast(forecast_input, freq=frequency_input)
+
+    # 🔄 Ajuster la longueur de la colonne 'time' pour correspondre à la prévision
+    forecast_dates = pd.date_range(start=target_data.index.max(), periods=len(point_forecast[0]), freq='H')
+
+    # Créer un DataFrame pour les prévisions
+    forecast = pd.DataFrame({'time': forecast_dates,
+                             'forecast': point_forecast[0]})
+
+    # 🔄 Convert 'time' column to matplotlib-compatible format
+    forecast['time'] = pd.to_datetime(forecast['time']).astype('int64') // 10**9  # Convert to numeric
+
+    # 📊 Affichage des courbes
+    plt.plot(pd.to_datetime(target_data.index).astype('int64') // 10**9, target_data[target], label=f'Données réelles ({target})')
+    plt.plot(forecast['time'], forecast['forecast'], label=f'Prévisions ({target})', linestyle='dashed')
+
+    # 📂 Sauvegarder les prévisions
+    forecast.to_csv(f"prediction_30heures_{target}.csv", index=False)
+    print(f"📁 Prévisions pour {target} enregistrées dans 'prediction_300heures_{target}.csv'")
+
+    # 🔍 Calcul des métriques
+    y_true = target_data[target].values[-len(forecast):]  # Dernières valeurs réelles disponibles pour la comparaison
+    y_pred = forecast['forecast'].values
+
+    # R²
+    r2 = r2_score(y_true, y_pred)
+
+    # MAE (Mean Absolute Error)
+    mae = mean_absolute_error(y_true, y_pred)
+    print(f"📊 MAE pour {target}: {mae:.4f}")
+
+    # MSE (Mean Squared Error)
+    mse = mean_squared_error(y_true, y_pred)
+    print(f"📊 MSE pour {target}: {mse:.4f}")
+
+# 🎨 Mise en forme du graphique
+plt.xlabel('Date et Heure')
+plt.ylabel('Occurrences')
+plt.title('Prédictions des différentes technologies sur 300 heures')
+plt.legend()
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
