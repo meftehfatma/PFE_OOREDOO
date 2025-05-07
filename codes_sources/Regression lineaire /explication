@@ -1,0 +1,49 @@
+Ce code réalise une régression linéaire pour prédire plusieurs variables cibles (count_fixe_jdid, count_4g, count_5g_box, et count_fibre) en fonction de plusieurs caractéristiques (timestamp, jour_semaine, et mois). Voici une explication générale de chaque étape du code :
+
+    Chargement et préparation des données :
+
+        Le fichier CSV est chargé dans un DataFrame df avec la bibliothèque pandas.
+
+        La colonne jour et heure est combinée pour créer une nouvelle colonne date_heure, qui est ensuite convertie en un format datetime pour permettre la manipulation des dates et heures.
+
+        La colonne date_heure est convertie en un timestamp (nombre de secondes depuis le 1er janvier 1970) pour être utilisée dans la régression linéaire.
+
+        Les valeurs manquantes dans la colonne timestamp sont supprimées pour éviter les erreurs lors de l'entraînement du modèle.
+
+    Sélection des variables indépendantes et dépendantes :
+
+        Les variables indépendantes (X) sont extraites comme étant timestamp, jour_semaine, et mois.
+
+        Les variables cibles (y_fixe_jdid, y_4g, y_5g_box, y_fibre) sont extraites de la DataFrame pour la régression linéaire.
+
+    Séparation des données en ensembles d'entraînement et de test :
+
+        Les données sont divisées en un ensemble d'entraînement et un ensemble de test avec un ratio de 80% pour l'entraînement et 20% pour les tests, à l'aide de la fonction train_test_split de sklearn.
+
+    Entraînement du modèle de régression linéaire :
+
+        Un modèle de régression linéaire est initialisé.
+
+        Ce modèle est ensuite entraîné sur les données d'entraînement pour chaque variable cible, et des prédictions (y_pred_*) sont effectuées sur l'ensemble de test.
+
+    Calcul des erreurs :
+
+        La fonction calculate_metrics calcule les erreurs de prédiction pour chaque variable cible en utilisant trois métriques :
+
+            MAE (Mean Absolute Error) : l'erreur absolue moyenne entre les prédictions et les valeurs réelles.
+
+            MSE (Mean Squared Error) : l'erreur quadratique moyenne, qui est plus sensible aux grandes erreurs.
+
+            R² (Coefficient de détermination) : une mesure de la qualité de l'ajustement du modèle (plus proche de 1 indique un meilleur modèle).
+
+    Affichage des résultats :
+
+        Les scores MAE, MSE, et R² pour chaque variable cible sont imprimés pour évaluer la performance de la régression linéaire.
+
+Ce que le code accomplit :
+
+    Il entraîne un modèle de régression linéaire pour chaque variable cible.
+
+    Il évalue les prédictions du modèle en utilisant des métriques courantes d'évaluation de modèles de régression.
+
+    Il fournit un aperçu de la performance du modèle sur les quatre variables cibles (count_fixe_jdid, count_4g, count_5g_box, et count_fibre).
