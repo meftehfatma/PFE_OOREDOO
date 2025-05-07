@@ -1,0 +1,52 @@
+Objectif :
+
+Prédire les valeurs futures de plusieurs types de technologies (count_fixe_jdid, count_4g, count_5g_box, count_fibre) en utilisant le modèle statistique ARIMA (AutoRegressive Integrated Moving Average).
+ Étapes de l'algorithme :
+
+    Importation des bibliothèques :
+
+        pandas et numpy pour la manipulation des données.
+
+        matplotlib pour la visualisation.
+
+        ARIMA du package statsmodels pour le modèle de prévision.
+
+        sklearn.metrics pour évaluer les performances de la prédiction.
+
+    Chargement des données :
+
+        Le fichier CSV df_counts_preprocessing.csv est chargé dans un DataFrame df.
+
+    Découpage en ensemble d’entraînement et de test :
+
+        Les 80% premières lignes sont utilisées pour entraîner le modèle (train), les 20% restantes pour tester (test).
+
+    Boucle sur chaque colonne cible (target_columns) :
+
+        Pour chaque technologie :
+
+            📈 Un modèle ARIMA(p=5, d=1, q=0) est ajusté sur les données d’entraînement.
+
+            🔮 Une prévision est faite sur toute la période de test.
+
+            📏 Des métriques d’évaluation sont calculées :
+
+                MAE : erreur absolue moyenne
+
+                MSE : erreur quadratique moyenne
+
+                R² : qualité d'ajustement
+
+            📊 Un graphique montre la série réelle vs la série prédite.
+
+✅ Avantages :
+
+    ARIMA est efficace pour les séries temporelles univariées stables et stationnaires.
+
+    Métriques claires pour comparer les performances.
+
+⚠️ Limites potentielles :
+
+    ARIMA ne gère pas bien la saisonnalité ou les données multivariées.
+
+    Les paramètres (p, d, q) doivent être choisis avec soin — ici, ils sont fixes.
