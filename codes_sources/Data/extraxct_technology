@@ -1,0 +1,45 @@
+#old_code
+import pandas as pd
+import json
+
+# Fonction pour extraire les technologies et les offres depuis un JSON
+def extract_technologies_and_offers(json_text):
+    if pd.isna(json_text) or not isinstance(json_text, str):
+        return None, None  # Retourner None si la donnée est vide ou invalide
+    
+    # Corriger les apostrophes et booléens pour rendre le JSON valide
+    json_text = json_text.replace("'", '"').replace("False", "false").replace("True", "true").replace("None", "null")
+    
+    try:
+        data = json.loads(json_text)  # Charger le JSON
+    except json.JSONDecodeError:
+        return None, None  # Retourner None en cas d'erreur de parsing
+    
+    technologies = []
+    offers = []
+
+    for tech in data.get('technologies', []):
+        tech_name = tech.get('technology_name')
+        if tech_name:
+            technologies.append(tech_name)
+        
+        for offer in tech.get('offer', []):
+            offer_name = offer.get('offer_name')
+            if offer_name:
+                offers.append(offer_name)
+
+    return ', '.join(technologies) if technologies else None, ', '.join(offers) if offers else None
+
+# 🔹 Étape 1 : Lire le fichier CSV
+input_file = "/home/fatma/Téléchargements/data_fixed.csv"  # 📂 Chemin du fichier d'entrée
+df = pd.read_csv(input_file, sep="|")  # Adapter le séparateur si nécessaire
+
+# 🔹 Étape 2 : Appliquer la fonction à la colonne 'response_body'
+df[['response_extracted_technologies', 'response_offers']] = df['response_body'].apply(lambda x: pd.Series(extract_technologies_and_offers(x)))
+df[['request_extracted_technologies', 'requested_offers']] = df['request_body'].apply(lambda x: pd.Series(extract_technologies_and_offers(x)))
+
+# 🔹 Étape 3 : Sauvegarder le résultat dans un nouveau fichier CSV
+output_file = "/home/fatma/Téléchargements/data_extracted.csv"  # 📂 Fichier de sortie
+df.to_csv(output_file, sep="|", index=False)
+
+print(f"✅ Extraction terminée. Résultat sauvegardé dans {output_file}")
