@@ -1,0 +1,81 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+# 🔹 Charger les fichiers CSV
+data_reelle = pd.read_csv("/home/fatma/Téléchargements/gdf.csv", sep='|')  
+df_model1 = pd.read_csv("/home/fatma/Téléchargements/all_regions_predictions_timegpt_fibre.csv")  
+df_model2 = pd.read_csv("/home/fatma/Téléchargements/timesfm_all_regions_predictions_fibre.csv")  
+df_model3 = pd.read_csv("/home/fatma/Téléchargements/Moirai_all_regions_predictions._fibre.csv")  
+
+# 🔹 Renommer les colonnes selon les modèles
+df_model1 = df_model1.rename(columns={'y': 'model1_pred'})  # TimeGPT
+df_model2 = df_model2.rename(columns={'y': 'model2_pred'})  # TimesFM
+df_model3 = df_model3.rename(columns={'y': 'model3_pred'})  # Moirai
+
+# 🔹 Convertir les dates
+data_reelle['ds'] = pd.to_datetime(data_reelle['ds'])
+df_model1['ds'] = pd.to_datetime(df_model1['ds'])
+df_model2['ds'] = pd.to_datetime(df_model2['ds'])
+df_model3['ds'] = pd.to_datetime(df_model3['ds'])
+
+# 🔹 Sécurité sur les types
+data_reelle['y'] = data_reelle['y'].astype(float)
+
+# 🔹 Fusion des données
+df = data_reelle.copy()
+df = df.merge(df_model1[['ds', 'region', 'model1_pred']], on=['ds', 'region'], how='left')
+df = df.merge(df_model2[['ds', 'region', 'model2_pred']], on=['ds', 'region'], how='left')
+df = df.merge(df_model3[['ds', 'region', 'model3_pred']], on=['ds', 'region'], how='left')
+
+# 🔹 Décodage des noms de régions (correction encodage UTF-8)
+df['region'] = df['region'].apply(lambda x: x.encode('latin1').decode('utf-8') if isinstance(x, str) else x)
+
+# 🔹 Conversion numérique
+df[['model1_pred', 'model2_pred', 'model3_pred']] = df[['model1_pred', 'model2_pred', 'model3_pred']].apply(pd.to_numeric, errors='coerce')
+
+# 🔹 Fonction d'évaluation
+def evaluate_model(y_true, y_pred):
+    y_pred = y_pred.fillna(0)  # Remplacer les NaN
+    mae = mean_absolute_error(y_true, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+    mape = np.mean(np.abs((y_true - y_pred) / y_true.replace(0, np.nan))) * 100  # éviter div/0
+    r2 = r2_score(y_true, y_pred)
+    return {'MAE': mae, 'RMSE': rmse, 'MAPE': mape, 'R2': r2}
+
+# 🔹 Analyse des performances globales (non pas par région)
+y_true = df['y']
+all_results = []
+
+# Calcul des métriques pour chaque modèle
+models = ['model1_pred', 'model2_pred', 'model3_pred']
+
+for model in models:
+    if model in df.columns:
+        metrics = evaluate_model(y_true, df[model])
+        metrics.update({'model': model})
+        all_results.append(metrics)
+
+# 🔹 Résumé des résultats globaux
+results_df = pd.DataFrame(all_results)
+results_df = results_df[['model', 'MAE', 'RMSE', 'MAPE', 'R2']]
+print("\n📊 Résultats globaux :\n", results_df)
+
+# 🔹 Export des résultats
+results_df.to_csv("/home/fatma/Téléchargements/resultats_globaux.csv", index=False)
+
+# 🔹 Analyse statistique des prédictions
+print("\n📈 Statistiques des prédictions :\n", df[['model1_pred', 'model2_pred', 'model3_pred']].describe())
+
+# 🔹 Tracé des erreurs des modèles
+plt.figure(figsize=(12, 6))
+for model in models:
+    plt.plot(df['ds'], abs(df['y'] - df[model]), label=f"Erreur {model}", linestyle='--')
+
+plt.legend()
+plt.title("Évolution des erreurs de prédiction par modèle")
+plt.xlabel("Date")
+plt.ylabel("Erreur absolue")
+plt.grid()
+plt.show()
