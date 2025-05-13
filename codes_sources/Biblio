@@ -1,0 +1,10 @@
+# Bibliotheque
+
+# TimesFM depuis HuggingFace (nécessite torch)
+pip install timesfm
+
+# PyTorch (si non déjà installé)
+pip install torch moirai uni2ts
+
+
+pip install pandas numpy matplotlib scikit-learn tensorflow geopandas
