@@ -1,0 +1,885 @@
+import os
+import re
+from datetime import datetime, timedelta
+
+import pandas as pd
+import numpy as np
+
+from sklearn.preprocessing import MinMaxScaler
+
+import spacy
+import torch
+
+from transformers import BartTokenizer, BartForConditionalGeneration
+
+from nixtla import NixtlaClient
+import timesfm
+
+from uni2ts.model.moirai import MoiraiForecast, MoiraiModule
+from gluonts.dataset.pandas import PandasDataset
+from gluonts.dataset.split import split
+
+import geopandas as gpd
+from shapely.geometry import Point
+from geopy.distance import geodesic
+
+from ipyleaflet import Map, Marker, basemaps
+from ipywidgets import Output, VBox
+
+# NLP & modèle BART setup
+nlp = spacy.load("fr_core_news_sm")
+
+tokenizer = BartTokenizer.from_pretrained("facebook/bart-base")
+model_bart = BartForConditionalGeneration.from_pretrained("facebook/bart-base")
+model_bart.eval()
+if torch.cuda.is_available():
+    model_bart = model_bart.to("cuda")
+
+# Nixtla Client
+nixtla_client = NixtlaClient(api_key="ton_api_key_ici")  # remplace par ta clé
+
+# TimesFM
+use_gpu = torch.cuda.is_available()
+timesfm_model = timesfm.TimesFm(
+    hparams=timesfm.TimesFmHparams(
+        backend="gpu" if use_gpu else "cpu",
+        per_core_batch_size=32,
+        horizon_len=168,
+        context_len=2048,
+        num_layers=50,
+        use_positional_embedding=False,
+    ),
+    checkpoint=timesfm.TimesFmCheckpoint(
+        huggingface_repo_id="google/timesfm-2.0-500m-pytorch"
+    ),
+)
+
+# Moirai
+moirai_model = MoiraiForecast(
+    module=MoiraiModule.from_pretrained("Salesforce/moirai-1.0-R-small"),
+    prediction_length=168,
+    context_length=200,
+    patch_size="auto",
+    num_samples=100,
+    target_dim=1,
+    feat_dynamic_real_dim=0,
+    past_feat_dynamic_real_dim=0,
+)
+moirai_predictor = moirai_model.create_predictor(batch_size=32)
+
+# --- Fonctions utilitaires ---
+
+def detect_question_type(question):
+    q = question.lower()
+    if any(word in q for word in ['éligible', 'offre', 'eligibility', 'éligibilité', 'eligibilite']):
+        return 'eligibilite'
+    elif any(word in q for word in ['vente', 'saturé', 'saturation', 'prévision des ventes']):
+        return 'ventes_saturation'
+    elif any(word in q for word in ['prediction', 'prévision', 'prévoir']):
+        return 'prediction'
+    else:
+        return 'unknown'
+
+
+def save_prediction_to_csv_custom(
+    technologie,
+    zone,
+    jours,
+    model,
+    predictions,
+    is_vente=False,
+    output_dir="/media/fatma/647c2ba2-2142-4259-a840-e8f23a1fedad/pfe_test/data/predictions"
+):
+    os.makedirs(output_dir, exist_ok=True)
+    prefix = "vente" if is_vente else "prediction"
+    zone_clean = zone.lower().replace(" ", "_")
+    techno_clean = technologie.lower().replace(" ", "_")
+    model_clean = model.lower().replace(" ", "_")
+
+    date_now = datetime.now().strftime("%Y-%m-%d")
+    filename = f"{prefix}_{techno_clean}_{jours}jours_{zone_clean}_{model_clean}_{date_now}.csv"
+    path = os.path.join(output_dir, filename)
+
+    df = pd.DataFrame([
+        {"date_prediction": date.strftime("%Y-%m-%d"), "valeur_predite": val}
+        for date, val in predictions
+    ])
+
+    df.to_csv(path, index=False)
+    print(f"✅ Prédiction enregistrée dans : {path}")
+
+# ============================================
+# Part 1 – Prédiction technologique
+# ============================================
+def part_1_prediction(question):
+    print(f"[Part1] Question reçue : {question}")
+
+    df_tech = pd.read_csv("/media/fatma/647c2ba2-2142-4259-a840-e8f23a1fedad/pfe_test/data/technologies_par_jour_ip_region_avec_gouvernorat.csv", sep='|')
+    df_tech = df_tech.rename(columns={"jour": "ds"})
+    df_tech["ds"] = pd.to_datetime(df_tech["ds"])
+    zones_available = [z for z in df_tech["N_FR_DEL"].dropna().unique().tolist() if isinstance(z, str)]
+    gouvernorats_available = [g for g in df_tech["N_FR_GOUV"].dropna().unique().tolist() if isinstance(g, str)]
+
+    def detect_zone_or_governorate(question, zones, gouvernorats):
+        question_lower = question.lower()
+        for z in zones:
+            if z and z.lower() in question_lower:
+                return "zone", z
+        for g in gouvernorats:
+            if g and g.lower() in question_lower:
+                return "gouvernorat", g
+        return None, None
+
+    def extract_technology_period_zone_model(question):
+        doc = nlp(question)
+        technologies = []
+        period = None
+        model = "timegpt"
+
+        tech_keywords = ["fibre", "fixe", "5g", "4g"]
+        model_keywords = {
+            "timesfm": ["timesfm", "times fm"],
+            "moirai": ["moirai"],
+            "timegpt": ["timegpt", "time gpt", "time-gpt"],
+        }
+
+        for token in doc:
+            if token.text.lower() in tech_keywords and token.text.lower() not in technologies:
+                technologies.append(token.text.lower())
+
+        match = re.search(r"\b(\d+)\s*(jours?|j)\b", question.lower())
+        if match:
+            period = int(match.group(1))
+
+        for key, synonyms in model_keywords.items():
+            if any(syn in question.lower() for syn in synonyms):
+                model = key
+                break
+
+        return technologies, period, model
+
+    def generate_forecast(df, days, model, tech=None, zone=None):
+        if df["y"].sum() == 0 or df["y"].isna().all():
+            print("⚠️ Série vide ou nulle. Impossible de générer une prévision.")
+            return None
+
+        df_forecast = None
+        try:
+            if model == "timegpt":
+                df = df.drop_duplicates(subset="ds").set_index("ds").asfreq("D")
+                df["y"] = df["y"].fillna(0)
+                df = df.reset_index()
+                future = nixtla_client.forecast(df=df[["ds", "y"]], h=days, freq="D")
+                df_forecast = pd.DataFrame({"ds": future["ds"], "forecast": future["TimeGPT"]})
+
+            elif model == "timesfm":
+                df = df.sort_values("ds")
+                y_values = df["y"].values.astype(float)
+                input_values = [y_values]
+                freq_values = [0]
+                forecast, _ = timesfm_model.forecast(input_values, freq=freq_values)
+                forecast_values = forecast[0][:days]
+                dates = pd.date_range(start=df["ds"].max() + timedelta(days=1), periods=days, freq="D")
+                df_forecast = pd.DataFrame({"ds": dates, "forecast": forecast_values})
+
+            elif model == "moirai":
+                df = df.groupby("ds", as_index=False).sum()  # <-- clé pour gouvernorat
+                df = df.sort_values("ds")
+                df["ds"] = pd.date_range(start=df["ds"].min(), periods=len(df), freq="D")  # assure la régularité temporelle
+                df_gluonts = PandasDataset(dict(df.set_index("ds")))
+                train, test_template = split(df_gluonts, offset=-days)
+                test_data = test_template.generate_instances(prediction_length=days, windows=1, distance=days)
+                forecasts = list(moirai_predictor.predict(test_data.input))
+                if not forecasts:
+                    print("⚠️ Moirai n'a pas généré de prévision.")
+                    return None
+                forecast_values = forecasts[0].mean[:days]
+                dates = pd.date_range(start=df["ds"].max() + timedelta(days=1), periods=days, freq="D")
+                df_forecast = pd.DataFrame({"ds": dates, "forecast": forecast_values})
+
+            if df_forecast is not None:
+                df_forecast["forecast"] = df_forecast["forecast"].round(0)
+                if df_forecast["forecast"].sum() == 0:
+                    print(f"📉 Prévision nulle pour '{tech}' dans '{zone}' sur {days} jours avec '{model}'.")
+                    return None
+                return df_forecast
+        except Exception as e:
+            print(f"❌ Erreur dans la génération de prévision ({model}): {e}")
+            return None
+
+        return None
+
+    def generate_text_with_bart(prompt, max_new_tokens=200):
+        inputs = tokenizer(prompt, return_tensors="pt", max_length=512, truncation=True)
+        if torch.cuda.is_available():
+            inputs = {k: v.to("cuda") for k, v in inputs.items()}
+        output_ids = model_bart.generate(**inputs, max_new_tokens=max_new_tokens)
+        return tokenizer.decode(output_ids[0], skip_special_tokens=True)
+
+    # Extraction paramètres
+    techs, period, model = extract_technology_period_zone_model(question)
+    print(f"[Part1] Technologies détectées: {techs}")
+    print(f"[Part1] Période détectée: {period}")
+    print(f"[Part1] Modèle choisi: {model}")
+
+    if not techs:
+        return "❌ Technologie non spécifiée."
+    if period is None:
+        return "❌ Durée non spécifiée."
+
+    zone_type, zone_value = detect_zone_or_governorate(question, zones_available, gouvernorats_available)
+    print(f"[Part1] Zone détectée: type={zone_type}, valeur={zone_value}")
+
+    if zone_type is None:
+        return f"❌ Zone non reconnue. Délégations : {', '.join(zones_available)}. Gouvernorats : {', '.join(gouvernorats_available)}"
+
+    target_col_map = {
+        "fibre": "count_fibre",
+        "fixe": "count_fixe_jdid",
+        "5g": "count_5g_box",
+        "4g": "count_4g",
+    }
+    target_col = target_col_map.get(techs[0])
+    if not target_col:
+        return "❌ Technologie non supportée."
+
+    if zone_type == "zone":
+        df_zone = df_tech[df_tech["N_FR_DEL"].str.lower() == zone_value.lower()].sort_values("ds")
+    else:
+        df_zone = df_tech[df_tech["N_FR_GOUV"].str.lower() == zone_value.lower()].sort_values("ds")
+
+    if len(df_zone) < 30:
+        return f"❌ Pas assez de données pour {zone_type} '{zone_value}' (minimum 30 jours requis)."
+
+    df_model = df_zone[["ds", target_col]].rename(columns={target_col: "y"})
+    df_forecast = generate_forecast(df_model, period, model, tech=techs[0], zone=zone_value)
+
+    if df_forecast is None:
+        return "📉 La prévision est vide ou impossible."
+
+    # Sauvegarde
+    save_prediction_to_csv_custom(
+        technologie=techs[0],
+        zone=zone_value,
+        jours=period,
+        model=model,
+        predictions=list(df_forecast[["ds", "forecast"]].itertuples(index=False, name=None)),
+        is_vente=False
+    )
+
+    resume = f"Prévision '{techs[0]}' dans le {zone_type} '{zone_value}' sur {period} jours avec le modèle '{model}':\n"
+    for _, row in df_forecast.iterrows():
+        resume += f"- {row['ds'].strftime('%Y-%m-%d')} : {int(row['forecast'])}\n"
+
+    prompt_bart = resume + "\nRésume cette prévision pour un responsable technique :"
+    texte = generate_text_with_bart(prompt_bart)
+
+    return resume + "\n📝 Résumé :\n" + texte
+
+
+# ============================================
+# Part 2 – Ventes et Saturation
+# ============================================# ... [tes imports, setup et autres fonctions déjà définies] ...
+
+# ============================================
+# Part 2 – Ventes et Saturation
+# ============================================def part_2_ventes_saturation(question):
+    # --- Chargement données ---
+def part_2_ventes_saturation(question):
+    # --- Chargement des données ---
+    df_sites = pd.read_csv("/media/fatma/647c2ba2-2142-4259-a840-e8f23a1fedad/pfe_test/data/ventes_par_site_et_jour.csv", sep="|")
+    df_potentiel = pd.read_csv("/media/fatma/647c2ba2-2142-4259-a840-e8f23a1fedad/pfe_test/data/Potentiel_fixe_JDID.csv", sep=";", encoding="latin-1")
+    df_vente = pd.read_csv("/media/fatma/647c2ba2-2142-4259-a840-e8f23a1fedad/pfe_test/data/ventes_par_jour_region_technologie.csv", sep="|")
+
+    # Nettoyage colonnes
+    df_sites.columns = df_sites.columns.str.strip().str.lower()
+    df_potentiel.columns = df_potentiel.columns.str.strip().str.lower()
+    df_vente.columns = df_vente.columns.str.strip().str.lower()
+    df_potentiel = df_potentiel.rename(columns={"site ": "site"})
+
+    df_sites["jour"] = pd.to_datetime(df_sites["jour"], errors="coerce")
+    df_vente["jour"] = pd.to_datetime(df_vente["jour"], errors="coerce")
+    df_sites = df_sites.rename(columns={"nombre_de_ventes_fixe_jdid": "y"})
+
+    zones_available = df_vente["n_fr_del"].dropna().unique().tolist()
+    gouvernorats_available = df_vente["n_fr_gouv"].dropna().unique().tolist()
+    sites_available = df_sites["site"].dropna().unique().tolist()
+
+    # --- Fonctions internes ---
+
+    def generate_text_with_bart(prompt, max_new_tokens=200):
+        inputs = tokenizer(prompt, return_tensors="pt", max_length=512, truncation=True)
+        if torch.cuda.is_available():
+            inputs = {k: v.to("cuda") for k, v in inputs.items()}
+        output_ids = model_bart.generate(**inputs, max_new_tokens=max_new_tokens)
+        return tokenizer.decode(output_ids[0], skip_special_tokens=True)
+
+    def detect_zone_or_governorate(question, zones, gouvernorats):
+        q = question.lower()
+        for z in zones:
+            if z.lower() in q:
+                return "delegation", z
+        for g in gouvernorats:
+            if g.lower() in q:
+                return "gouvernorat", g
+        return None, None
+
+    def extract_info(question):
+        doc = nlp(question)
+        tech_keywords = ["fibre", "fixe", "5g", "4g"]
+        model_keywords = {
+            "timesfm": ["timesfm", "times fm"],
+            "moirai": ["moirai"],
+            "timegpt": ["timegpt", "time gpt", "time-gpt"],
+        }
+
+        technology = None
+        model = "timegpt"
+        period = None
+        site = None
+
+        # Extraction technologie
+        for token in doc:
+            if token.text.lower() in tech_keywords:
+                technology = token.text.lower()
+                break
+
+        # Extraction durée (jours)
+        match = re.search(r"(\d+)\s*(jours?|j)", question.lower())
+        if match:
+            period = int(match.group(1))
+
+        # Extraction modèle
+        for m, syns in model_keywords.items():
+            if any(syn in question.lower() for syn in syns):
+                model = m
+                break
+
+        # Extraction site
+        for s in sites_available:
+            if s.lower() in question.lower():
+                site = s
+                break
+
+        # Extraction zone/gouvernorat
+        zone_type, zone_value = detect_zone_or_governorate(question, zones_available, gouvernorats_available)
+
+        return technology, model, period, site, zone_type, zone_value
+
+    def generate_forecast(df, days, model, tech=None, zone=None):
+        df_forecast = None
+
+        if model == "timegpt":
+            df = df.drop_duplicates(subset="ds").set_index("ds").asfreq("D")
+            df["y"] = df["y"].fillna(0)
+            df = df.reset_index()
+            future = nixtla_client.forecast(df=df[["ds", "y"]], h=days, freq="D")
+            df_forecast = pd.DataFrame({"ds": future["ds"], "forecast": future["TimeGPT"]})
+
+        elif model == "timesfm":
+            df = df.sort_values("ds")
+            y_values = df["y"].values.astype(float)
+            input_values = [y_values]
+            freq_values = [0]
+            forecast, _ = timesfm_model.forecast(input_values, freq=freq_values)
+            forecast_values = forecast[0][:days]
+            dates = pd.date_range(start=df["ds"].max() + timedelta(days=1), periods=days, freq="D")
+            df_forecast = pd.DataFrame({"ds": dates, "forecast": forecast_values})
+
+        elif model == "moirai":
+            df = df.groupby("ds", as_index=False).sum()
+            df = df.sort_values("ds")
+            df["ds"] = pd.date_range(start=df["ds"].min(), periods=len(df), freq="D")
+            df_gluonts = PandasDataset(dict(df.set_index("ds")))
+            train, test_template = split(df_gluonts, offset=-days)
+            test_data = test_template.generate_instances(prediction_length=days, windows=1, distance=days)
+            forecasts = list(moirai_predictor.predict(test_data.input))
+            if not forecasts:
+                print("⚠️ Moirai n'a pas généré de prévision.")
+                return None
+            forecast_values = forecasts[0].mean[:days]
+            dates = pd.date_range(start=df["ds"].max() + timedelta(days=1), periods=days, freq="D")
+            df_forecast = pd.DataFrame({"ds": dates, "forecast": forecast_values})
+
+        if df_forecast is not None:
+            df_forecast["forecast"] = df_forecast["forecast"].round(0)
+            if df_forecast["forecast"].sum() == 0:
+                print(f"📉 Prévision nulle pour '{tech}' dans '{zone}' sur {days} jours avec '{model}'.")
+                return None
+            return df_forecast
+        return None
+
+    def predict_saturation_date_simple(site, model, max_days=1000):
+        # Nettoyage colonnes et préparation
+        df_sites_copy = df_sites.copy()
+        df_potentiel_copy = df_potentiel.copy()
+
+        df_sites_copy.columns = df_sites_copy.columns.str.strip().str.lower()
+        df_potentiel_copy.columns = df_potentiel_copy.columns.str.strip().str.lower()
+        df_potentiel_copy = df_potentiel_copy.rename(columns={"site ": "site"})
+
+        df_sites_copy["jour"] = pd.to_datetime(df_sites_copy["jour"], errors="coerce")
+        df_sites_copy = df_sites_copy.rename(columns={"nombre_de_ventes_fixe_jdid": "y"})
+
+        site = site.strip().upper()
+        df_sites_copy["site"] = df_sites_copy["site"].astype(str).str.strip().str.upper()
+        df_potentiel_copy["site"] = df_potentiel_copy["site"].astype(str).str.strip().str.upper()
+
+        if site not in df_potentiel_copy["site"].values:
+            return f"❌ Potentiel inconnu pour le site {site}."
+
+        potentiel = df_potentiel_copy[df_potentiel_copy["site"] == site]["potentiel"].values[0]
+
+        df_site = df_sites_copy[df_sites_copy["site"] == site].sort_values("jour")
+        if df_site.empty:
+            return f"❌ Aucune donnée historique pour le site {site}."
+
+        df_site["cumul"] = df_site["y"].cumsum()
+        cumul_actuel = df_site["cumul"].iloc[-1]
+
+        if cumul_actuel >= potentiel:
+            date_sat = df_site[df_site["cumul"] >= potentiel].iloc[0]["jour"].date()
+            return f"✅ Le site {site} est déjà saturé depuis le {date_sat}."
+
+        last_date = df_site["jour"].max()
+        cumul = cumul_actuel
+
+        remaining_days = max_days
+        while cumul < potentiel and remaining_days > 0:
+            days_to_predict = min(30, remaining_days)
+            df_model = df_site.rename(columns={"jour": "ds"})[["ds", "y"]]
+
+            forecast = generate_forecast(df_model, days_to_predict, model=model)
+
+            if forecast is None or forecast["forecast"].sum() == 0:
+                return "📉 Impossible de prédire la saturation, prévisions nulles."
+
+            cumul += forecast["forecast"].sum()
+            last_date = forecast["ds"].iloc[-1]
+
+            nouvelles_df = forecast.rename(columns={"ds": "jour", "forecast": "y"})[["jour", "y"]]
+            df_site = pd.concat([df_site, nouvelles_df], ignore_index=True).sort_values("jour")
+            df_site["cumul"] = df_site["y"].cumsum()
+
+            remaining_days -= days_to_predict
+
+        if cumul >= potentiel:
+            return f"✅ Le site {site} sera saturé le {last_date.date()} (prévision sur {max_days - remaining_days} jours)."
+        else:
+            return f"ℹ️ Le site {site} ne sera pas saturé dans les {max_days} prochains jours prévus. Cumul estimé: {int(cumul)} / {potentiel}"
+
+    # Fonction principale qui répond à la question
+    def answer_sales_question(question):
+        tech, model, period, site, zone_type, zone_value = extract_info(question)
+
+        # Demande de saturation
+        if site and ("satur" in question.lower()):
+            return predict_saturation_date_simple(site, model=model)
+
+        if not tech and not site:
+            return "❌ Spécifie une technologie + région/gouvernorat, ou un site."
+
+        if period is None:
+            return "❌ Durée non spécifiée."
+
+        if site:
+            df_site = df_sites[df_sites["site"] == site].sort_values("jour")
+            if df_site.empty:
+                return f"❌ Aucune donnée pour le site {site}."
+
+            df_model = df_site.rename(columns={"jour": "ds"})[["ds", "y"]]
+            prevision = generate_forecast(df_model, period, model=model)
+            if prevision is None:
+                return f"📉 Impossible de prédire pour le site {site}."
+
+            # Sauvegarde avant retour
+            save_prediction_to_csv_custom(
+                technologie=tech if tech else "inconnue",
+                zone=site,
+                jours=period,
+                model=model,
+                predictions=list(prevision[["ds", "forecast"]].itertuples(index=False, name=None)),
+                is_vente=True
+            )
+
+            texte = generate_text_with_bart(f"Prévision des ventes sur le site {site} :\n{prevision}\nFais un résumé.")
+            return f"📈 Prévision pour le site {site} sur {period} jours :\n{prevision.to_string(index=False)}\n\n📝 Résumé :\n{texte}"
+
+        elif zone_type and zone_value and tech:
+            col_zone = "n_fr_del" if zone_type == "delegation" else "n_fr_gouv"
+            df_zone = df_vente[(df_vente["tchnologie"].str.lower() == tech) &
+                               (df_vente[col_zone].str.lower() == zone_value.lower())].sort_values("jour")
+            if df_zone.empty:
+                return f"❌ Aucune donnée pour {tech} dans {zone_value}."
+
+            df_model = df_zone.rename(columns={"jour": "ds", "nb_ventes": "y"})[["ds", "y"]]
+            prevision = generate_forecast(df_model, period, model=model)
+            if prevision is None:
+                return f"📉 Impossible de prédire pour {tech} dans {zone_value}."
+
+            # Sauvegarde avant retour
+            save_prediction_to_csv_custom(
+                technologie=tech,
+                zone=zone_value,
+                jours=period,
+                model=model,
+                predictions=list(prevision[["ds", "forecast"]].itertuples(index=False, name=None)),
+                is_vente=True
+            )
+
+            texte = generate_text_with_bart(f"Prévision des ventes de {tech} dans {zone_value} :\n{prevision}\nFais un résumé.")
+            return f"📊 Prévision de {tech} dans {zone_value} sur {period} jours :\n{prevision.to_string(index=False)}\n\n📝 Résumé :\n{texte}"
+
+        return "❌ Question invalide."
+
+    return answer_sales_question(question)
+
+# ============================================
+# Part 3 – Eligibilité (exemple simple)
+# ============================================
+def part_3_eligibilite(question=None):
+    import folium
+    import webbrowser
+    import os
+    import geopandas as gpd
+    import pandas as pd
+    from shapely.geometry import Point
+    import json
+    import numpy as np
+    from functools import partial
+
+    # Configuration des chemins
+    MAP_FILE = "coverage_map.html"
+    SHAPEFILES = [
+        ("/media/fatma/647c2ba2-2142-4259-a840-e8f23a1fedad/pfe_test/data/FTTH_Eligibility_04032025.shp", ["Fibre"]),
+        ("/media/fatma/647c2ba2-2142-4259-a840-e8f23a1fedad/pfe_test/data/FWA_30Mbps_Ind_region.shp", ["Fixe JDID Indoor 30Mbps"]),
+        ("/media/fatma/647c2ba2-2142-4259-a840-e8f23a1fedad/pfe_test/data/FWA_30Mbps_Out_region.shp", ["Fixe JDID Outdoor 30Mbps", "5G BOX"]),
+        ("/media/fatma/647c2ba2-2142-4259-a840-e8f23a1fedad/pfe_test/data/FWA_50Mbps_Ind_region.shp", ["Fixe JDID Indoor 50Mbps"]),
+        ("/media/fatma/647c2ba2-2142-4259-a840-e8f23a1fedad/pfe_test/data/FWA_50Mbps_Out_region.shp", ["Fixe JDID Outdoor 50Mbps", "5G BOX"]),
+        ("/media/fatma/647c2ba2-2142-4259-a840-e8f23a1fedad/pfe_test/data/FWA_100Mbps_Ind_region.shp", ["Fixe JDID Indoor 100Mbps"]),
+        ("/media/fatma/647c2ba2-2142-4259-a840-e8f23a1fedad/pfe_test/data/FWA_100Mbps_Out_region.shp", ["Fixe JDID Outdoor 100Mbps", "5G BOX"]),
+    ]
+    SITES_FILE = "/media/fatma/647c2ba2-2142-4259-a840-e8f23a1fedad/pfe_test/data/sites 5g.csv"
+
+    def load_data():
+        """Charge les données de couverture et les sites"""
+        coverage_data = []
+        for path, labels in SHAPEFILES:
+            try:
+                gdf = gpd.read_file(path).to_crs(epsg=4326)
+                
+                # Simplifier les géométries pour réduire la taille
+                gdf['geometry'] = gdf['geometry'].simplify(tolerance=0.001)
+                
+                coverage_data.append((gdf, labels))
+                print(f"✅ {', '.join(labels)} chargé ({os.path.basename(path)})")
+            except Exception as e:
+                print(f"❌ Erreur de chargement pour {labels} ({path}) : {e}")
+        
+        try:
+            df_sites = pd.read_csv(SITES_FILE)
+            print(f"✅ Sites 5G chargés ({len(df_sites)} sites)")
+            return coverage_data, df_sites
+        except Exception as e:
+            print(f"❌ Erreur de chargement des sites : {e}")
+            return coverage_data, None
+
+    def generate_map():
+        """Génère la carte interactive avec détection des technologies"""
+        print("Chargement des données...")
+        coverage_data, df_sites = load_data()
+        
+        print("Création de la carte...")
+        m = folium.Map(location=[36.8, 10.2], zoom_start=9)
+        map_id = m.get_name()
+        
+        # Préparation des données pour JavaScript
+        sites_js = "var sites = [];\n"
+        if df_sites is not None:
+            for _, row in df_sites.iterrows():
+                sites_js += f"sites.push({{name: `{row['SITENAME']}`, lat: {row['LATITUDE']}, lng: {row['LONGITUDE']}}});\n"
+        
+        # Préparation des données de couverture pour JavaScript
+        coverage_js = "var coverageData = [];\n"
+        for idx, (gdf, labels) in enumerate(coverage_data):
+            # Convertir en GeoJSON
+            geojson = gdf.__geo_interface__
+            
+            # Ajouter les données de couverture
+            coverage_js += f"""
+            coverageData[{idx}] = {{
+                labels: {json.dumps(labels)},
+                geojson: {json.dumps(geojson)}
+            }};\n"""
+        
+        # Boîte d'affichage améliorée
+        coord_box = """
+        <div id="coord-display" style="position: fixed; bottom: 20px; left: 50%; 
+                transform: translateX(-50%); z-index: 1000; background: white; 
+                padding: 15px; border: 2px solid #3498db; border-radius: 10px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15); width: 350px; max-width: 90%;
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+            <div style="text-align: center; margin-bottom: 10px; font-weight: bold; color: #2c3e50; font-size: 18px;">
+                Analyse de couverture
+            </div>
+            <div id="coord-content" style="font-size: 14px; color: #34495e;">
+                Cliquez sur la carte pour analyser la position
+            </div>
+        </div>
+        """
+        m.get_root().html.add_child(folium.Element(coord_box))
+
+        # Script JavaScript principal
+        script = f"""
+        <script>
+            // Fonction pour vérifier si un point est dans un polygone
+            function pointInPolygon(point, vs) {{
+                var x = point[0], y = point[1];
+                var inside = false;
+                for (var i = 0, j = vs.length - 1; i < vs.length; j = i++) {{
+                    var xi = vs[i][0], yi = vs[i][1];
+                    var xj = vs[j][0], yj = vs[j][1];
+                    
+                    var intersect = ((yi > y) != (yj > y))
+                        && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+                    if (intersect) inside = !inside;
+                }}
+                return inside;
+            }}
+            
+            // Fonction pour extraire les coordonnées des polygones
+            function extractCoordinates(geojson) {{
+                const coordinates = [];
+                geojson.features.forEach(feature => {{
+                    if (feature.geometry.type === 'MultiPolygon') {{
+                        feature.geometry.coordinates.forEach(polygon => {{
+                            polygon.forEach(ring => {{
+                                coordinates.push(ring);
+                            }});
+                        }});
+                    }} else if (feature.geometry.type === 'Polygon') {{
+                        coordinates.push(feature.geometry.coordinates[0]);
+                    }}
+                }});
+                return coordinates;
+            }}
+            
+            // Calcul de la distance entre deux points
+            function calculateDistance(lat1, lon1, lat2, lon2) {{
+                const R = 6371; // Rayon de la Terre en km
+                const dLat = (lat2 - lat1) * Math.PI / 180;
+                const dLon = (lon2 - lon1) * Math.PI / 180;
+                const a = 
+                    Math.sin(dLat/2) * Math.sin(dLat/2) +
+                    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+                    Math.sin(dLon/2) * Math.sin(dLon/2);
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                return R * c;
+            }}
+
+            // Stockage des données
+            {sites_js}
+            {coverage_js}
+            
+            document.addEventListener('DOMContentLoaded', function() {{
+                var map = window['{map_id}'];
+                var coordDisplay = document.getElementById('coord-content');
+                
+                if (!map) {{
+                    coordDisplay.innerHTML = '<span style="color: #e74c3c;">Erreur: Carte non initialisée</span>';
+                    return;
+                }}
+                
+                map.on('click', function(e) {{
+                    // Afficher un indicateur de chargement
+                    coordDisplay.innerHTML = '<div style="text-align:center;">Analyse en cours...</div>';
+                    
+                    // Donner le temps au navigateur de mettre à jour l'interface
+                    setTimeout(function() {{
+                        // Coordonnées
+                        var lat = e.latlng.lat.toFixed(6);
+                        var lng = e.latlng.lng.toFixed(6);
+                        var point = [parseFloat(lng), parseFloat(lat)];
+                        
+                        // Technologies disponibles
+                        var technologies = [];
+                        
+                        // Vérifier chaque jeu de données de couverture
+                        for (var i = 0; i < coverageData.length; i++) {{
+                            var data = coverageData[i];
+                            var found = false;
+                            
+                            // Extraire les coordonnées des polygones
+                            var polygons = extractCoordinates(data.geojson);
+                            
+                            // Vérifier si le point est dans l'un des polygones
+                            for (var j = 0; j < polygons.length && !found; j++) {{
+                                if (pointInPolygon(point, polygons[j])) {{
+                                    technologies = technologies.concat(data.labels);
+                                    found = true;
+                                }}
+                            }}
+                        }}
+                        
+                        // Supprimer les doublons
+                        technologies = [...new Set(technologies)];
+                        
+                        // Construire le HTML pour l'affichage
+                        var techHtml = `<b>Coordonnées:</b> ${{lat}}, ${{lng}}<br>`;
+                        
+                        // Technologies disponibles
+                        techHtml += `<b>Technologies:</b> `;
+                        if (technologies.length > 0) {{
+                            techHtml += `<span style="color: #27ae60;">${{technologies.join(', ')}}</span><br>`;
+                        }} else {{
+                            techHtml += `<span style="color: #e74c3c;">Aucune technologie disponible</span><br>`;
+                        }}
+                        
+                        // Site le plus proche
+                        if (sites.length > 0) {{
+                            var minDist = Infinity;
+                            var nearestSite = null;
+                            
+                            for (var i = 0; i < sites.length; i++) {{
+                                var dist = calculateDistance(
+                                    parseFloat(lat), 
+                                    parseFloat(lng),
+                                    sites[i].lat,
+                                    sites[i].lng
+                                );
+                                
+                                if (dist < minDist) {{
+                                    minDist = dist;
+                                    nearestSite = sites[i];
+                                }}
+                            }}
+                            
+                            techHtml += `<b>Site 5G le plus proche:</b> ${{nearestSite.name}} `;
+                            techHtml += `<span style="color: #2980b9;">(${{minDist.toFixed(2)}} km)</span>`;
+                        }} else {{
+                            techHtml += `<b>Sites 5G:</b> <span style="color: #e74c3c;">Aucun site disponible</span>`;
+                        }}
+                        
+                        coordDisplay.innerHTML = techHtml;
+                    }}, 50);
+                }});
+            }});
+        </script>
+        """
+        m.get_root().html.add_child(folium.Element(script))
+        
+        # Sauvegarde et ouverture
+        m.save(MAP_FILE)
+        print(f"Carte sauvegardée dans {os.path.abspath(MAP_FILE)}")
+        webbrowser.open(f"file://{os.path.abspath(MAP_FILE)}")
+        print("Carte ouverte. Cliquez pour analyser les positions.")
+
+        
+        return m
+
+    # Exécuter la génération de la carte
+    return generate_map()
+# Main handler
+# ============================================
+def handle_question(question):
+    print(f"Question : {question}")
+    type_question = detect_question_type(question)
+    print(f"Type de question détecté : {type_question}")
+
+    if type_question == 'prediction':
+        return part_1_prediction(question)
+    elif type_question == 'ventes_saturation':
+        return part_2_ventes_saturation(question)
+    elif type_question == 'eligibilite':
+        return part_3_eligibilite(question)
+    else:
+        return "❌ Je ne comprends pas le type de question."
+def insert_predictions_to_new_table(df, table_name, db_params=None):
+    import psycopg2
+    from psycopg2.extras import execute_values
+
+    if db_params is None:
+        db_params = {
+            "host": "127.0.0.1",
+            "port": 5432,
+            "dbname": "test",
+            "user": "postgres",
+            "password": "fatma12"
+        }
+
+    try:
+        conn = psycopg2.connect(**db_params)
+        cursor = conn.cursor()
+
+        # Création dynamique de la table
+        create_query = f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            id UUID,
+            date_actuelle TIMESTAMP,
+            technologie_ou_site TEXT,
+            date_prediction DATE,
+            valeur_predite FLOAT
+        );
+        """
+        cursor.execute(create_query)
+
+        # Insertion des données
+        values = df[["id", "date_actuelle", "technologie_ou_site", "date_prediction", "valeur_predite"]].values.tolist()
+        insert_query = f"""
+            INSERT INTO {table_name} (id, date_actuelle, technologie_ou_site, date_prediction, valeur_predite)
+            VALUES %s
+        """
+        execute_values(cursor, insert_query, values)
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+        print(f"✅ Données insérées dans la table : {table_name}")
+    except Exception as e:
+        print(f"❌ Erreur PostgreSQL : {e}")
+
+def save_prediction_to_csv_custom(
+    technologie,
+    zone,
+    jours,
+    model,
+    predictions,
+    is_vente=False,
+    output_dir="/media/fatma/647c2ba2-2142-4259-a840-e8f23a1fedad/pfe_test/data/predictions"
+):
+    import uuid
+
+    os.makedirs(output_dir, exist_ok=True)
+    prefix = "vente" if is_vente else "prediction"
+    zone_clean = zone.lower().replace(" ", "_")
+    techno_clean = technologie.lower().replace(" ", "_")
+    model_clean = model.lower().replace(" ", "_")
+
+    date_now = datetime.now().strftime("%Y-%m-%d")
+    filename = f"{prefix}_{techno_clean}_{jours}jours_{zone_clean}_{model_clean}_{date_now}.csv"
+    path = os.path.join(output_dir, filename)
+
+    id_unique = str(uuid.uuid4())
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    data = []
+    for date_prediction, valeur in predictions:
+        data.append({
+            "id": id_unique,
+            "date_actuelle": now,
+            "technologie_ou_site": f"{technologie} - {zone}",
+            "date_prediction": date_prediction.strftime("%Y-%m-%d"),
+            "valeur_predite": valeur
+        })
+
+    df = pd.DataFrame(data)
+    df.to_csv(path, index=False)
+    print(f"✅ Prédiction enregistrée dans : {path}")
+
+    # Nom dynamique de la table PostgreSQL
+    table_name = f"{prefix}_{techno_clean}_{zone_clean}_{model_clean}_{date_now}".replace("-", "_")
+    insert_predictions_to_new_table(df, table_name)
+
+question = "prediction vente  du fibre timesfm dans 20 jours kebili?"
+reponse = handle_question(question)
+print(reponse)
