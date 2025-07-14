@@ -1,1 +1,131 @@
 
+Le fichier `connect.py` est un **système complet de backend intelligent** pour traiter trois grands types de requêtes en langage naturel, à savoir :
+
+---
+
+### ✅ **1. Prédiction des demandes par technologie et région**
+
+Fonction principale : `part_1_prediction(question)`
+
+🔍 **Étapes** :
+
+* Charge un CSV contenant les volumes de demande (`count_fibre`, `count_4g`, etc.) par jour et par région.
+* Analyse la question en français (ex: "prédis le fixe à Tunis pendant 7 jours avec Moirai") :
+
+  * ➤ Extrait la technologie (`fixe`, `fibre`, etc.)
+  * ➤ Extrait la durée (ex: `7 jours`)
+  * ➤ Extrait le modèle demandé (`TimeGPT`, `TimesFM`, `Moirai`)
+  * ➤ Détecte si la zone mentionnée est une délégation ou un gouvernorat.
+* Prépare la série temporelle `y` (variable cible) et la colonne `ds` (dates).
+* Utilise le modèle sélectionné pour faire la prévision :
+
+  * **TimeGPT** via `nixtla_client.forecast(...)`
+  * **TimesFM** avec la classe `TimesFm`
+  * **Moirai** avec GluonTS
+* Sauvegarde les prévisions dans un CSV, et les insère dans PostgreSQL.
+* Génère un résumé avec **BART** (modèle de texte de Facebook/Meta).
+* Retourne un texte lisible avec les prévisions et un résumé intelligent.
+
+---
+
+### ✅ **2. Prédiction des ventes et détection de saturation des sites**
+
+Fonction principale : `part_2_ventes_saturation(question)`
+
+🔍 **Étapes** :
+
+* Charge 3 fichiers CSV :
+
+  * Ventes par site (fixe JDID)
+  * Potentiel maximum de chaque site
+  * Ventes par région et technologie
+* Analyse la question pour extraire :
+
+  * Le nom du **site** (ex : "BAR1001")
+  * La technologie (ex : "fibre")
+  * Le modèle demandé
+  * La période
+  * La zone ou le gouvernorat
+* Deux cas :
+
+  * ✅ **Prédiction des ventes** sur un site ou une zone.
+  * ✅ **Calcul de la date de saturation** si le site est mentionné.
+* Pour la saturation :
+
+  * Calcule le cumul des ventes actuelles.
+  * Si ce cumul < potentiel :
+
+    * Génère des prévisions par blocs de 30 jours jusqu’à dépasser le potentiel ou la limite de 1000 jours.
+  * Retourne la date estimée de saturation.
+
+---
+
+### ✅ **3. Vérification d’éligibilité aux technologies par carte**
+
+Fonction principale : `part_3_eligibilite(question=None)`
+
+🗺️ **Fonctionnalité** :
+
+* Génère une carte interactive (avec `folium`) contenant :
+
+  * Les polygones de couverture issus de shapefiles (`shp`)
+  * Les positions des sites 5G
+* L’utilisateur peut **cliquer sur une position**, et le système affiche :
+
+  * ➤ Les technologies disponibles à cet endroit
+  * ➤ Le site 5G le plus proche avec la distance
+
+---
+
+### 🔄 **Pipeline de traitement automatique de la question**
+
+Fonction : `handle_question(question)`
+
+🔧 Fonctionnement :
+
+* Analyse le type de question :
+
+  * `prediction` → appel à `part_1_prediction()`
+  * `ventes_saturation` → appel à `part_2_ventes_saturation()`
+  * `eligibilite` → appel à `part_3_eligibilite()`
+
+---
+
+### 🧠 **Technologies & Modèles utilisés**
+
+* **NLP** : spaCy (pour l’extraction d’entités et de mots clés)
+* **Génération de texte** : BART (`facebook/bart-base`)
+* **Séries temporelles** :
+
+  * `TimeGPT` (API Nixtla)
+  * `TimesFM` (modèle de Google)
+  * `Moirai` (de Salesforce)
+* **Cartographie** : `folium`, `geopandas`
+* **Base de données** : PostgreSQL (`psycopg2`) pour stocker les prédictions
+* **CSV** : Sauvegarde locale de toutes les prévisions
+
+---
+
+### 📌 Exemple de question traitée
+
+```plaintext
+"Prédis les ventes de fibre à Sfax pendant 7 jours avec Moirai"
+```
+
+➡️ Détecte :
+
+* Type : prévision de ventes
+* Technologie : fibre
+* Région : Sfax
+* Modèle : Moirai
+* Durée : 7 jours
+
+➡️ Retourne :
+
+* Une prévision chiffrée jour par jour
+* Un résumé BART en langage naturel
+* Un fichier CSV enregistré
+* Insertion dans PostgreSQL
+
+---
+
