@@ -1,0 +1,90 @@
+.login-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  background-color: #d0021b;
+  flex-direction: column;
+}
+
+.login-box {
+  background-color: white;
+  padding: 40px;
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  width: 350px;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.login-title {
+  color: black;
+  margin-bottom: 30px;
+  font-size: 24px;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.login-input {
+  padding: 12px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 16px;
+  color: black;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.login-button {
+  padding: 12px;
+  background-color: #d0021b;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 16px;
+  cursor: pointer;
+  font-weight: bold;
+  width: 100%;
+}
+
+.login-instruction {
+  color: white;
+  text-align: center;
+  margin-top: 20px;
+  font-size: 14px;
+}
+
+.login-error {
+  color: red;
+  margin-top: 10px;
+  font-size: 14px;
+}
+.login-container {
+  position: relative; /* nécessaire pour positionner le logo absolu */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  background-color: #d0021b;
+  flex-direction: column;
+  padding-top: 60px; /* espace pour le logo en haut */
+}
+
+/* Logo positionné en haut à droite */
+.logo-wrapper {
+  position: absolute;
+  top: 20px;
+  right: 30px;
+  z-index: 10; /* au-dessus du reste */
+}
+
+
+.logo-img {
+  height: 150px; /* Taille agrandie */
+  width: auto;   /* Garde les proportions */
+}
+
