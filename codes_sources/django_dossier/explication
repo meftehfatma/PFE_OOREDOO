@@ -1,0 +1,94 @@
+
+---
+
+## 🔧 `manage.py`
+
+C’est le **point d’entrée principal** d’un projet Django.
+Il permet de lancer le serveur (`runserver`), faire des migrations, exécuter des scripts, etc.
+Il initialise le projet avec les bons paramètres de configuration.
+
+---
+
+## 🌐 `urls.py`
+
+Ce fichier définit les **routes** de ton application Django :
+
+* `/admin/` : accès à l’administration Django.
+* `/api/ask/` : point d’API que ton frontend utilise pour envoyer les questions du chatbot.
+* `toutes les autres routes` (ex : `/chatbot`, `/login`) sont redirigées vers React (le `index.html` buildé) pour que le routing fonctionne côté client.
+
+---
+
+## 🎯 `views.py`
+
+Ce fichier contient deux **vues importantes** :
+
+1. **`ask_view`** :
+
+   * Reçoit les requêtes `POST` du chatbot.
+   * Récupère la question envoyée par le frontend.
+   * L’envoie à la fonction IA `handle_question()` (dans `connect.py`).
+   * Retourne la réponse en JSON au frontend.
+
+2. **`react_app_view`** :
+
+   * Sert le fichier `index.html` généré par React.
+   * C’est ce qui permet d’intégrer l’interface React dans Django.
+   * Si le fichier n’existe pas, un message d’erreur est affiché.
+
+---
+
+## ⚙️ `settings.py`
+
+C’est le **fichier de configuration** de ton projet Django.
+
+Voici les éléments clés :
+
+* **Applications installées** :
+
+  * Django de base (`admin`, `auth`, etc.)
+  * `rest_framework` pour les API.
+  * `corsheaders` pour autoriser les requêtes entre frontend/backend.
+  * Ton app personnalisée : `api`.
+
+* **Middleware** :
+
+  * Gère les requêtes HTTP, la sécurité, les sessions, etc.
+  * Ajoute `corsheaders.middleware.CorsMiddleware` pour accepter les requêtes React.
+
+* **CORS\_ALLOW\_ALL\_ORIGINS = True** :
+
+  * Permet à **toutes les origines** (y compris React en localhost) d’appeler l’API (uniquement en développement !).
+
+* **ALLOWED\_HOSTS** :
+
+  * Définit les domaines autorisés à accéder à ton app (`localhost`, `127.0.0.1`, etc.).
+
+* **TEMPLATES et STATICFILES\_DIRS** :
+
+  * Indiquent à Django où aller chercher :
+
+    * les fichiers HTML (`index.html` de React)
+    * les fichiers statiques (`main.js`, `styles.css`, etc.)
+
+---
+
+## 🌍 `wsgi.py`
+
+Ce fichier est utilisé pour **déployer ton projet Django** sur un serveur (ex : `gunicorn`, `nginx`).
+Il configure l’application WSGI de Django, c’est-à-dire le point d’entrée pour que le serveur web puisse l’exécuter.
+
+---
+
+## 🔗 Résumé de l’architecture Django + React
+
+| Fonction               | Composant Django             | Rôle                                                               |
+| ---------------------- | ---------------------------- | ------------------------------------------------------------------ |
+| Serveur React          | `react_app_view` + `re_path` | Sert le `index.html` compilé                                       |
+| API du chatbot         | `ask_view` + `/api/ask/`     | Reçoit la question, appelle `handle_question`, retourne la réponse |
+| Intégration IA         | `connect.py` (importé)       | Contient toute la logique de prédiction                            |
+| Configuration générale | `settings.py`                | Gère la sécurité, CORS, apps installées, templates                 |
+| Déploiement            | `wsgi.py`                    | Interface entre Django et un serveur web                           |
+
+---
+
