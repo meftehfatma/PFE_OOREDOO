@@ -1,0 +1,89 @@
+l' application React est un chatbot intelligent sécurisé par une page de connexion :
+
+    Elle permet uniquement aux utilisateurs autorisés (ex. prenom.nom@ooredoo.tn) d'accéder au chatbot.
+
+    Le chatbot envoie des questions au backend et affiche les réponses intelligentes (prédictions IA, vérification d’éligibilité, etc.).
+
+🧩 Architecture des composants
+1. App.js : Routeur principal
+
+<Routes>
+  <Route path="/" element={<Login onLogin={handleLogin} />} />
+  <Route path="/chatbot" element={isAuthenticated ? <Chatbot /> : <Navigate to="/" replace />} />
+</Routes>
+
+➡️ Rôle :
+
+    Affiche la page de login par défaut (/)
+
+    Redirige vers /chatbot seulement si isAuthenticated est true (sécurité)
+
+2. Login.js : Formulaire de connexion
+🔐 Sécurité :
+
+    Vérifie que l’email est au format : prenom.nom@ooredoo.tn
+
+    Compare l’email à une liste blanche (allowedEmails)
+
+    Vérifie que le mot de passe est non vide
+
+    Si tout est bon → déclenche onLogin() et redirige vers /chatbot
+
+📦 CSS associé :
+
+.login-container { ... }       // Layout global de la page
+.logo-wrapper { ... }          // Position du logo en haut à droite
+.login-box { ... }             // Bloc blanc du formulaire
+.login-button { ... }          // Bouton "Se connecter"
+.login-error { color: red; }   // Affichage d'erreur
+
+3. Chatbot.js : Interface du chatbot
+🧾 Structure :
+
+    messages : contient l’historique des échanges (utilisateur ↔ bot)
+
+    input : contient la question actuelle
+
+    bottomRef : scroll automatique vers le bas
+
+📤 Fonction sendMessage :
+
+    Envoie une requête POST à ton backend (/api/ask/)
+
+    Payload JSON : { question: "texte de la question" }
+
+    Récupère data.answer de la réponse du backend
+
+    Ajoute la réponse au fil de discussion
+
+const response = await fetch('/api/ask/', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ question: input }),
+});
+
+🔁 useEffect permet le scroll vers le bas automatique à chaque message.
+🖼️ Interface :
+
+    Messages utilisateur alignés à droite (rouge)
+
+    Messages du bot alignés à gauche (gris)
+
+    Barre de saisie + bouton Envoyer en bas
+
+4. login.css et App.css :
+🎨 Design unifié :
+
+    Couleur dominante : #d0021b (rouge Ooredoo)
+
+    Police : Arial, claire et professionnelle
+
+    Responsive : centré verticalement et horizontalement
+
+🎯 Objectif UI :
+
+    Interface simple
+
+    Code couleur : blanc sur rouge pour les titres/boutons, noir pour le texte
+
+    Logo en haut à droite sur toutes les pages
